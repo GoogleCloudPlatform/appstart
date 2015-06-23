@@ -11,29 +11,19 @@ system tests in this manner.
 # pylint: disable=bad-indentation, g-bad-import-order
 
 import io
-import json
-import logging
 import os
 import requests
-import socket
-import ssl
 import sys
-import tarfile
-import tempfile
 import time
 import urlparse
 
 import docker
 
+import utils
+from utils import get_logger
 
-# HTTP timeout for docker client
-TIMEOUT_SECS = 60
-
-# Repo where the devappserver base image can be found (change this later)
-DEVAPPSERVER_IMAGE = 'gouzenko/devappserver'
-
-# Default docker host if user isn't using boot2docker
-LINUX_DOCKER_HOST = '/var/run/docker.sock'
+# Devappserver base image
+DEVAPPSERVER_IMAGE = 'appstart_devappserver_base'
 
 # Maximum attempts to health check application container.
 MAX_ATTEMPTS = 30
@@ -44,59 +34,73 @@ YAML_MSG = 'The yaml file must be in the application\'s root directory.'
 # XML file error message
 XML_MSG = 'The xml file must be in the WEB-INF directory.'
 
+# Default port that the application is expected to listen on inside
+# the application container.
+DEFAULT_APPLICATION_PORT = 8080
+
+# Time format for naming images/containers
+TIME_FMT = '%Y.%m.%d_%H.%M.%S'
+
 # Java offset for the xml file's location, relative to the root
 # diretory of the WAR archive
-JAVA_OFFSET = 'WEB-INF'
-
-
-_logger = None
-
-
-def get_logger():
-    global _logger
-    if _logger is None:
-        _logger = logging.getLogger('appstart')
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.INFO)
-        _logger.addHandler(sh)
-    return _logger
+JAVA_OFFSET = 'WEB-INF/'
 
 
 class ContainerSandbox(object):
     """Sandbox to manage the user application & devappserver containers.
 
     This sandbox aims to leave the docker container space untouched.
-    The application & devappserver containers should be created, started,
-    stopped, and destroyed before the script terminates.
+    Proper usage ensures that application & devappserver containers will
+    be created, started, stopped, and destroyed. For proper usage, the
+    ContainerSandbox should be used as a context manager (inside a "with"
+    statement), or the start and stop functions should be invoked from
+    within a try-finally context.
     """
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=too-many-arguments
 
     def __init__(self,
-                 application_directory,
+                 config_file,
                  admin_port=8000,
                  application_id='temp',
                  app_port=8080,
-                 config_file_name='app.yaml',
                  image_name=None,
-                 internal_api_port=10000,
-                 internal_proxy_port=20000,
+                 internal_admin_port=32768,
+                 internal_api_port=32769,
+                 internal_proxy_port=32770,
                  log_path='/tmp/log/appengine',
+                 run_api_server=True,
                  storage_path='/tmp/appengine/storage',
                  use_cache=True):
         """Get the sandbox ready to construct and run the containers.
 
         Args:
-            application_directory: (basestring) the relative or full path
-                to the directory of the application that should be run.
-                This path will be used to build the application container.
-                Therefore, the application_directory should have a
-                Dockerfile. If it doesn't, image_name should be specified.
-            admin_port: (int) the port on the docker server host that
+            config_file: (basestring) The relative or full path
+                to the config_file of the application. If image_name is
+                not specified, this path will be used to help find the
+                Dockerfile and build the application container.
+                Therefore, if image_name is not specified, there should
+                be a Dockerfile in the correct location:
+
+                Non-java apps (apps that use .yaml files)
+                1) The .yaml file must be in the root of the app
+                   directory.
+                2) The Dockerfile must be in the root of the app
+                   directory.
+
+                Java apps (apps that are built off java-compat):
+                1) The appengine-web.xml file must be in
+                   <root>/WEB-INF/ (where <root> is the root
+                   directory of the WAR archive.)
+                2) The Dockerfile must be in the root of the WAR
+                   archive.
+                3) There must be a web.xml file in the same
+                   directory as the appengine-web.xml file.
+            admin_port: (int) The port on the docker server host that
                 should be mapped to the admin server, which runs inside
                 the devappserver container. The admin panel will be
                 accessible through this port.
-            application_id: (basestring) The application's id. This is
+            application_id: (basestring) The application ID is
                 the unique "appengine application ID" that the app is
                 identified by, and can be found in the developer's
                 console. While for deployment purposes, this ID is
@@ -106,64 +110,73 @@ class ContainerSandbox(object):
                 with the same application_id, (and of course, the same
                 storage_path) the datastore, blobstore, taskqueue, etc
                 will persist assuming their data has not been deleted.
-            app_port: (int) the port on the docker host that should be
+            app_port: (int) The port on the docker host that should be
                 mapped to the application. The application will be
                 accessible through this port.
-            config_file_name: (basestring) the name of the application's
-                yaml or xml file. If using a yaml file, the yaml file
-                should be in the root of the application directory. If
-                using an xml file (javascript only), the xml file should
-                be in WEB-INF, a folder in the root directory of the
-                WAR.
-            image_name: (basestring or None) if specified, the sandbox
+            image_name: (basestring or None) If specified, the sandbox
                 will run the image associated with image_name instead of
                 building an image from the specified application_directory.
-            internal_api_port: (int) the port INSIDE the devappserver
-                container that the api server should bind to. Because this
-                is internal to the container, it doesn't need to be
-                changed. In fact, you shouldn't change it unless you have
-                a reason to and know what you're doing.
-            internal_proxy_port: (int) the port INSIDE the devappserver
-                container that the proxy should bind to. Because this is
-                internal to the container, it doesn't need to be changed.
-                ~Same disclaimer as the one for internal_api_port.~
-            log_path: (basetring) the path where the application's
+            internal_admin_port: (int) The port INSIDE the devappserver
+                container that the admin panel binds to. Because this
+                is internal to the container, it can be defaulted.
+                In fact, you shouldn't change it from the default unless
+                you have a reason to.
+            internal_api_port: (int) The port INSIDE the devappserver
+                container that the api server should bind to.
+                ~Same disclaimer as the one for internal_admin_port.~
+            internal_proxy_port: (int) The port INSIDE the devappserver
+                container that the proxy should bind to.
+                ~Same disclaimer as the one for internal_admin_port.~
+            log_path: (basetring) The path where the application's
                 logs should be collected. Note that the application's logs
                 will be collected EXTERNALLY (ie they will collect in the
                 docker host's file system) and log_path specifies where
                 these logs should go.
-            storage_path: (basestring) the path (external to the
+            run_api_server: (bool) Whether or not to run the api server.
+                If this argument is set to false, the sandbox won't start
+                a devappserver.
+            storage_path: (basestring) The path (external to the
                 containers) where the data associated with the api
                 server's services - datastore, blobstore, etc - should
                 collect. Note that this path defaults to
                 /tmp/appengine/storage, so it should be changed if the data
                 is intended to persist.
-            use_cache: (bool) whether or not to use the cache when building
+            use_cache: (bool) Whether or not to use the cache when building
                 images.
         """
-        self.devappserver_container = None
-        self.app_container = None
+        self.devappserver_container = {}
+        self.app_container = {}
         self.app_id = application_id
         self.internal_api_port = internal_api_port
-        self.app_directory = application_directory
         self.internal_proxy_port = internal_proxy_port
+        self.internal_admin_port = internal_admin_port
         self.port = app_port
         self.storage_path = storage_path
         self.log_path = log_path
         self.image_name = image_name
         self.admin_port = admin_port
-        self.dclient = ContainerSandbox.get_docker_client()
+        self.dclient = utils.get_docker_client()
         self.nocache = not use_cache
-        self.app_path, self.config_file_relative_path = (
-            ContainerSandbox.parse_directory_structure(
-                config_file_name,
-                application_directory))
+        self.run_devappserver = run_api_server
+        self.conf_path = os.path.abspath(config_file)
+        self.verify_structure(self.conf_path)
+        self.app_dir = (self.app_directory_from_config(self.conf_path)
+                        if not image_name else None)
+
+        self.conf_name = os.path.basename(self.conf_path)
+        self.cur_time = time.strftime(TIME_FMT)
+
+        # For Java apps, the xml file must be offset by WEB-INF.
+        # Otherwise, devappserver will think that it's a non-java app.
+        is_java_app = self.conf_name.endswith('.xml')
+        self.internal_offset = JAVA_OFFSET if is_java_app else ''
 
     def __enter__(self):
         self.start()
         return self
 
     def start(self):
+        """Start the sandbox."""
         try:
             self.create_and_run_containers()
         except KeyboardInterrupt:  # pylint: disable=bare-except
@@ -180,53 +193,57 @@ class ContainerSandbox(object):
             raise
 
     def create_and_run_containers(self):
-        """Creates and runs application and devappserver containers.
+        """Creates and runs app and (optionally) devappserver containers.
 
-        This includes the creation of a new devappserver image. An image
-        is created for the application as well. Newly made containers are
-        cleaned up, but newly made images are not. Images are named based
-        on the folder they're located in.
+        This includes the creation of a new devappserver image, unless
+        self.run_devappserver is False. If image_name isn't specified, an
+        image is created for the application as well. Newly made containers
+        are cleaned up, but newly made images are not.
         """
 
-        # Devappserver must know APP_ID to properly interface with
-        # services like datastore, blobstore, etc. It also needs
-        # to know where to find the config file, which port to
-        # run the proxy on, and which port to run the api server on.
-        das_env = {'APP_ID': self.app_id,
-                   'PROXY_PORT': self.internal_proxy_port,
-                   'API_PORT': self.internal_api_port,
-                   'APP_YAML_FILE': self.config_file_relative_path}
+        if self.run_devappserver:
+            # Devappserver must know APP_ID to properly interface with
+            # services like datastore, blobstore, etc. It also needs
+            # to know where to find the config file, which port to
+            # run the proxy on, and which port to run the api server on.
+            das_env = {'APP_ID': self.app_id,
+                       'PROXY_PORT': self.internal_proxy_port,
+                       'API_PORT': self.internal_api_port,
+                       'APP_YAML_FILE': os.path.join(self.internal_offset,
+                                                     self.conf_name)}
+            devappserver_image = self.build_devappserver_image()
+            devappserver_container_name = (
+                self.make_timestamped_name('devappserver',
+                                           self.cur_time))
 
-        devappserver_image = self.build_devappserver_image()
-        devappserver_container_name = self.make_devappserver_container_name()
+            # The host_config specifies port bindings and volume bindings.
+            # /storage is bound to the storage_path. Internally, the
+            # devappserver writes all the db files to /storage. The mapping
+            # thus allows these files to appear on the host machine. As for
+            # port mappings, we only want to expose the application (via the
+            # proxy), and the admin panel.
+            devappserver_hconf = docker.utils.create_host_config(
+                port_bindings={
+                    self.internal_proxy_port: self.port,
+                    self.internal_admin_port: self.admin_port,
+                },
+                binds={
+                    self.storage_path: {'bind': '/storage'},
+                }
+            )
 
-        # The host_config specifies port bindings and volume bindings.
-        # /storage is bound to the storage_path. Internally, the
-        # devappserver writes all the db files to /storage. The mapping
-        # thus allows these files to appear on the host machine. As for
-        # port mappings, we only want to expose the application (via the
-        # proxy), and the admin panel.
-        devappserver_hconf = docker.utils.create_host_config(
-            binds={
-                self.storage_path: {'bind': '/storage'},
-            },
-            port_bindings={
-                self.internal_proxy_port: self.port,
-                8000: self.admin_port,
-            }
-        )
+            self.devappserver_container = self.dclient.create_container(
+                name=devappserver_container_name,
+                image=devappserver_image,
+                ports=[self.internal_proxy_port, self.internal_admin_port],
+                volumes=['/storage'],
+                host_config=devappserver_hconf,
+                environment=das_env
+            )
 
-        self.devappserver_container = self.dclient.create_container(
-            name=devappserver_container_name,
-            ports=[self.internal_proxy_port, 8000],
-            image=devappserver_image,
-            volumes=['/storage'],
-            environment=das_env,
-            host_config=devappserver_hconf
-        )
-
-        self.dclient.start(self.devappserver_container.get('Id'))
-        get_logger().info('Starting container: %s', devappserver_container_name)
+            self.dclient.start(self.devappserver_container.get('Id'))
+            get_logger().info('Starting container: %s',
+                              devappserver_container_name)
 
         # The application container needs several environment variables
         # in order to start up the application properly, as well as
@@ -239,13 +256,13 @@ class ContainerSandbox(object):
         # API_HOST is 0.0.0.0 because application container runs on the
         #     same network stack as devappserver.
         # MODULE_YAML_PATH specifies the path to the app from the
-        #     app_directory
+        #     app directory
         app_env = {'API_HOST': '0.0.0.0',
                    'API_PORT': self.internal_api_port,
                    'GAE_LONG_APP_ID': self.app_id,
                    'GAE_PARTITION': 'dev',
                    'GAE_MODULE_INSTANCE': '0',
-                   'MODULE_YAML_PATH': self.config_file_relative_path,
+                   'MODULE_YAML_PATH': os.path.basename(self.conf_path),
                    'GAE_MODULE_NAME': 'default',
                    'GAE_MODULE_VERSION': '1',
                    'GAE_SERVER_PORT': '8080',
@@ -254,27 +271,40 @@ class ContainerSandbox(object):
         # Build from the application directory iff image_name is not
         # specified.
         app_image = self.image_name or self.build_app_image()
-        app_container_name = self.make_app_container_name()
+        app_container_name = self.make_timestamped_name('test_app',
+                                                        self.cur_time)
+
+        # If devappserver is running, hook up the app to it.
+        if self.run_devappserver:
+            ports = [DEFAULT_APPLICATION_PORT]
+            port_bindings = {DEFAULT_APPLICATION_PORT: self.port}
+            network_mode = ('container:%s' %
+                            self.devappserver_container.get('Id'))
+        else:
+            ports = port_bindings = network_mode = None
 
         app_hconf = docker.utils.create_host_config(
+            port_bindings=port_bindings,
             binds={
                 self.log_path: {'bind': '/var/log/app_engine'}
             },
+
         )
 
         self.app_container = self.dclient.create_container(
             name=app_container_name,
-            volumes=['/var/log/app_engine'],
             image=app_image,
+            ports=ports,
+            volumes=['/var/log/app_engine'],
             host_config=app_hconf,
             environment=app_env,
         )
 
         # Start as a shared network container, putting the application
-        # on devappserver's network stack.
+        # on devappserver's network stack. (If devappserver is not
+        # running, network_mode is None).
         self.dclient.start(self.app_container.get('Id'),
-                           network_mode='container:%s'
-                           % self.devappserver_container.get('Id'))
+                           network_mode=network_mode)
 
         get_logger().info('Starting container: %s', app_container_name)
         self.wait_for_start()
@@ -283,112 +313,114 @@ class ContainerSandbox(object):
                           str(self.port))
 
     def stop(self):
-        """Call __exit__() to clean up the environment."""
-        self.stop_and_remove_containers([self.app_container,
-                                         self.devappserver_container])
+        """Remove containers to clean up the environment."""
+        self.stop_and_remove_containers()
 
     def __exit__(self, etype, value, traceback):
         """Stop and remove containers to clean up the environment.
 
         Args:
-            etype: (type) the type of exception
-            value: (Exception) an instance of the exception raised
-            traceback: (traceback) an instance of the current traceback
+            etype: (type) The type of exception
+            value: (Exception) An instance of the exception raised
+            traceback: (traceback) An instance of the current traceback
+
         Returns:
             True if the sandbox was exited normally (ie exiting the with
             block or KeyboardInterrupt).
         """
         self.stop()
 
-    def stop_and_remove_containers(self, cont_list):
-        """Stop and remove application containers.
-
-        Args:
-            cont_list: ([{basestring:basestring, ...}, ...]) a list of
-                containers that should be stopped and removed. Each
-                container is a dictionary (as returned by
-                docker.Client.create_container)
-        """
-        for cont in cont_list:
-            if cont:
+    def stop_and_remove_containers(self):
+        """Stop and remove application containers."""
+        for cont in [self.devappserver_container, self.app_container]:
+            if 'Id' in cont:
                 cont_id = cont.get('Id')
+                if cont_id is None:
+                    continue
                 get_logger().info('Stopping %s', cont_id)
                 self.dclient.kill(cont_id)
 
                 get_logger().info('Removing %s', cont_id)
+                cont['Id'] = None
                 self.dclient.remove_container(cont_id)
 
     def get_docker_host(self):
-        """Get hostname of machine where the docker client is running."""
+        """Get hostname of machine where the docker client is running.
+
+        Returns:
+            (basestring) The hostname of the machine where the docker
+            client is running.
+        """
         return urlparse.urlparse(self.dclient.base_url).hostname
 
     def wait_for_start(self):
-        """Wait for the app container to start."""
+        """Wait for the app container to start.
+
+        Raises:
+            RuntimeError: If the application server doesn't
+                start after MAX_ATTEMPTS to reach it on 8080.
+        """
         attempt = 1
         while True:
+            get_logger().info('Checking if server running: attempt #%i',
+                              attempt)
             try:
-                time.sleep(1)
-                get_logger().info('Checking if server running: attempt #%i',
-                                  attempt)
-                attempt += 1
-                rep = requests.get('http://%s:%s/_ah/health' %
-                                   (self.get_docker_host(), self.port))
-                if rep.status_code == 200:
-                    break
-                if attempt > MAX_ATTEMPTS:
-                    raise RuntimeError('The application server timed out.')
+                requests.get('http://%s:%s/' %
+                             (self.get_docker_host(), self.port))
+                break
             except requests.exceptions.ConnectionError:
                 pass
 
+            attempt += 1
+            if attempt > MAX_ATTEMPTS:
+                raise RuntimeError('The application server timed out.')
+            time.sleep(1)
+
     def build_app_image(self):
-        """Build the app image from the Dockerfile in app_directory.
+        """Build the app image from the Dockerfile in app_dir.
 
         Returns:
-            (basestring) the name of the new application image.
-
+            (basestring) The name of the new app image.
         """
-        image_name = ContainerSandbox.make_app_image_name()
-        res = self.dclient.build(path=self.app_path,
+        name = self.make_timestamped_name('app_image', self.cur_time)
+        res = self.dclient.build(path=self.app_dir,
                                  rm=True,
                                  nocache=self.nocache,
                                  quiet=False,
-                                 tag=image_name)
-        ContainerSandbox.log_and_check_build_results(res, image_name)
-        return image_name
+                                 tag=name)
+        utils.log_and_check_build_results(res, name)
+        return name
 
     def build_devappserver_image(self):
         """Build a layer over devappserver to include application files.
 
-        The new image contains the user's application (including the app.yaml)
-        files.
+        The new image contains the user's config files.
 
         Returns:
-            the name of the new devappserver image.
-
-        Raises:
-            Exception: if the app directory or yaml file cannot be found.
+            (basestring) The name of the new devappserver image.
         """
         # pylint: disable=too-many-locals, unused-variable
         # Collect the files that should be added to the docker build
         # context.
-        files_to_add = []
-        for root, dirs, files in os.walk(self.app_path, topdown=False):
-            for name in files:
-                files_to_add.append(os.path.join(root, name))
+        files_to_add = {self.conf_path: None}
+        if self.conf_path.endswith('.xml'):
+            files_to_add[self.get_web_xml(self.conf_path)] = None
 
-        # The Dockerfile should add everything inside the application
-        # directory to the /app folder in devappserver's container.
+        # The Dockerfile should add the config files to
+        # the /app folder in devappserver's container.
         dockerfile = """
         FROM %(das_repo)s
-        ADD %(path)s /app
+        ADD %(path)s/* %(dest)s
         """ %{'das_repo': DEVAPPSERVER_IMAGE,
-              'path': self.app_path}
+              'path': os.path.dirname(self.conf_path),
+              'dest': os.path.join('/app', self.internal_offset)}
 
         # Construct a file-like object from the Dockerfile.
         dockerfile_obj = io.BytesIO(dockerfile.encode('utf-8'))
-        build_context = self.make_tar_build_context(dockerfile_obj,
-                                                    files_to_add)
-        image_name = ContainerSandbox.make_devappserver_image_name()
+        build_context = utils.make_tar_build_context(dockerfile_obj,
+                                                     files_to_add)
+        image_name = self.make_timestamped_name('devappserver_image',
+                                                self.cur_time)
 
         # Build the devappserver image.
         res = self.dclient.build(fileobj=build_context,
@@ -398,247 +430,86 @@ class ContainerSandbox(object):
                                  tag=image_name)
 
         # Log the output of the build.
-        ContainerSandbox.log_and_check_build_results(res, image_name)
+        utils.log_and_check_build_results(res, image_name)
         return image_name
 
     @staticmethod
-    def parse_directory_structure(config_file_name, app_directory):
-        """Verify a correct directory structure.
-
-        There are a few things that constitute a "proper" directory
-        structure, and this varies between Java apps and all other
-        apps:
-            Non-java apps (apps that use .yaml files)
-                1) The .yaml file must be in the root of the app
-                   directory.
-                2) The Dockerfile (if the sandbox is supposed to build
-                   the application image) must be in the root of the app
-                   directory.
-            Java apps (apps that are built off java-compat):
-                1) The .xml file must be in /WEB-INF/ (relative to the
-                   root directory of the WAR archive.)
-                2) The Dockerfile (if the sandbox is supposed to build
-                   the application image) must be in the root of the WAR
-                   archive.
+    def get_web_xml(full_config_file_path):
+        """Get (what should be) the path of the web.xml file.
 
         Args:
-            config_file_name: (basestring) the name of the configuration
-                file (must be a yaml or xml file).
-            app_directory: (basestring) the root directory of the
-                application.
+            full_config_file_path: (basestring) The absolute path to a
+                .xml config file.
 
         Returns:
-            (basestring, basestring): a tuple where the first element is
-            the absolute path to the application root directory, and
-            the second element is the relative path to the config
-            file. For non-Java applications, the relative path to the
-            config file should just be the name of the yaml file
-            (since the yaml file) should be in the root directory.
-            For Java applications, the relative path should be the
-            name of the xml file, prefixed with JAVA_OFFSET.
+            (basestring) The full path to the web.xml file.
+        """
+        return os.path.join(os.path.dirname(full_config_file_path),
+                            'web.xml')
+
+    @staticmethod
+    def verify_structure(full_config_file_path):
+        """Verify the correctness of the configuration files.
+
+        This includes making sure that the configuration file exists and
+        has a proper extension. If the config file is an xml file, there
+        needs to be a web.xml file in the same directory.
+
+        Args:
+            full_config_file_path: (basestring) The absolute path to a
+                .xml or .yaml config file.
 
         Raises:
-            ValueError: if one of the following 4 things happens:
-                1) The path to the directory doesn't exist.
-                2) The config_file_name is actually a path.
-                3) The config file is not an xml or yaml file.
-                4) The config file could not be found where it should be.
+            ValueError: If the config_file does not have a proper
+                extension (.yaml or .xml)
+            IOError: If the application is a Java app, and
+                the web.xml file cannot be found, or the config
+                file cannot be found.
         """
-        # Ensure that the application directory exists.
-        if os.path.exists(app_directory):
-            app_path = os.path.abspath(app_directory)
-        else:
-            raise ValueError('The path \"%s\" could not be resolved.' %
-                             app_directory)
+        if not os.path.exists(full_config_file_path):
+            raise IOError('The path %s could not be resolved.' %
+                          full_config_file_path)
 
-        # Ensure that the config_file_name is a file name and not a path
-        if os.path.basename(config_file_name) != config_file_name:
-            raise ValueError('config_file_name must be a name, not a path')
-
-        is_yaml_file = True
-        if config_file_name.endswith('.yaml'):
-            config_file_relative_path = config_file_name
-        elif config_file_name.endswith('.xml'):
-            is_yaml_file = False
-            config_file_relative_path = os.path.join(JAVA_OFFSET,
-                                                     config_file_name)
-        else:
-            raise ValueError('config_file_name is not a valid '
+        filename = os.path.basename(full_config_file_path)
+        if not (filename.endswith('.xml') or filename.endswith('.yaml')):
+            raise ValueError('config_file is not a valid '
                              'configuration file. Use either a .yaml '
-                             'file or .xml file')
+                             'file or .xml file.')
 
-        full_conf_path = os.path.join(app_path, config_file_relative_path)
-        if not os.path.isfile(full_conf_path):
-            raise ValueError('Could not find the application\'s '
-                             'config file at %(path)s. %(errormsg)s'
-                             % {'path': full_conf_path,
-                                'errormsg': (YAML_MSG if is_yaml_file
-                                             else XML_MSG)
-                               })
-
-        return app_path, config_file_relative_path
+        if filename.endswith('.xml'):
+            webxml = ContainerSandbox.get_web_xml(full_config_file_path)
+            if not os.path.exists(webxml):
+                raise IOError('Could not find web.xml at: %s' % webxml)
 
     @staticmethod
-    def log_and_check_build_results(build_res, image_name):
-        """Log the results of a docker build.
+    def app_directory_from_config(full_config_file_path):
+        """Get the application root directory based on the config file.
 
         Args:
-            build_res: ([basestring, ...]) a generator of build results,
-                as returned by docker.Client.build
-            image_name: (basestring) the name of the image associated
-                with the build results (for logging purposes only)
-        Raises:
-            docker.errors.DockerException: if the build failed.
-        """
-        get_logger().info('-' * 20 + '  BUILDING IMAGE  ' + '-' * 20)
-        get_logger().info('IMAGE  : %s', image_name)
-
-        success = True
-        try:
-            for chunk in build_res:
-                if not chunk:
-                    continue
-                line = json.loads(chunk)
-                if 'stream' in line:
-                    logmsg = line['stream'].strip()
-                    get_logger().info(logmsg)
-                elif 'error' in line:
-                    success = False
-                    logmsg = line['error'].strip()
-                    get_logger().error(logmsg)
-                elif 'errorDetail' in line:
-                    success = False
-                    logmsg = line['errorDetail']['message'].strip()
-                    get_logger().error(logmsg)
-        finally:
-            get_logger().info('-' * 58)
-
-        if not success:
-            raise docker.errors.DockerException('Image build failed.')
-
-    @staticmethod
-    def get_docker_client():
-        """Get the user's docker client."""
-        host = os.environ.get('DOCKER_HOST')
-        cert_path = os.environ.get('DOCKER_CERT_PATH')
-        tls_verify = os.environ.get('DOCKER_TLS_VERIFY')
-
-        params = {}
-
-        if host:
-            params['base_url'] = (host.replace('tcp://', 'https://')
-                                  if tls_verify else host)
-        elif sys.platform.startswith('linux'):
-            # if this is a linux user, the default value of DOCKER_HOST
-            # should be the unix socket.  first check if the socket is
-            # valid to give a better feedback to the user.
-            if os.path.exists(LINUX_DOCKER_HOST):
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                try:
-                    sock.connect(LINUX_DOCKER_HOST)
-                    params['base_url'] = 'unix://' + LINUX_DOCKER_HOST
-                except socket.error:
-                    get_logger().warning('Found a stale '
-                                         '/var/run/docker.sock, '
-                                         'did you forget to start '
-                                         'your docker daemon?')
-                finally:
-                    sock.close()
-
-        if tls_verify and cert_path:
-            # assert_hostname=False is needed for boot2docker to work with
-            # our custom registry.
-            params['tls'] = docker.tls.TLSConfig(
-                client_cert=(os.path.join(cert_path, 'cert.pem'),
-                             os.path.join(cert_path, 'key.pem')),
-                ca_cert=os.path.join(cert_path, 'ca.pem'),
-                verify=True,
-                ssl_version=ssl.PROTOCOL_TLSv1,
-                assert_hostname=False)
-
-        # pylint: disable=star-args
-        client = docker.Client(version='auto',
-                               timeout=TIMEOUT_SECS,
-                               **params)
-        try:
-            client.ping()
-        except requests.exceptions.ConnectionError as excep:
-            get_logger().error('Failed to connect to Docker '
-                               'Daemon due to: %s', excep)
-            raise
-        return client
-
-    @staticmethod
-    def make_app_container_name():
-        """Construct a name for the app container.
+            full_config_file_path: (basestring) The absolute path to a
+                config file.
 
         Returns:
-            (basestring) the name of the app container
+            (basestring): The application's root directory.
         """
-        return 'test_app.' + str(time.strftime('%Y.%m.%d_%H.%M.%S'))
-
-    # pylint: disable=invalid-name
-    @staticmethod
-    def make_devappserver_container_name():
-        """Construct a name for the devappserver container.
-
-        Returns:
-            (basestring) the name of the devappserver container
-        """
-        return 'devappserver.' + str(time.strftime('%Y.%m.%d_%H.%M.%S'))
+        conf_file_dir = os.path.dirname(full_config_file_path)
+        if full_config_file_path.endswith('.yaml'):
+            return conf_file_dir
+        else:
+            return os.path.dirname(conf_file_dir)
 
     @staticmethod
-    def make_app_image_name():
-        """Construct a name for the application image.
+    def make_timestamped_name(base, time_str):
+        """Construct a name for an image or container.
 
-        The image name is based on the application directory, with
-        the assumption that the directory's name somehow describes
-        the application. Note that naming is totally unimportant and
-        serves only to make the output of 'docker images' look cleaner.
-
-        Returns:
-            (basestring) the name of the app image
-        """
-        return 'application_image'
-
-    @staticmethod
-    def make_devappserver_image_name():
-        """Construct a name for the new devappserver image.
-
-        Returns:
-            (basestring) the name of the devappserver image
-        """
-        return 'devappserver_image'
-
-    @staticmethod
-    def make_tar_build_context(dockerfile, context_files):
-        """Compose tar file for the new devappserver layer's build context.
+        Note that naming is functionally unimportant and
+        serves only to make the output of 'docker images'
+        and 'docker ps' look cleaner.
 
         Args:
-            dockerfile: (io.BytesIO) a file-like buffer representing the
-                Dockerfile.
-            context_files: ([basestring, ...]) a list of absolute filepaths
-                for other files that should be added to the build context.
-
+            base: (basestring) The prefix of the name.
+            time_str: (basestring) The name's timestamp.
         Returns:
-            (TarFile) a temporary tarfile representing the docker build
-            context
+            (basestring) The name of the image or container.
         """
-        f = tempfile.NamedTemporaryFile()
-        t = tarfile.open(mode='w', fileobj=f)
-
-        # Add dockerfile to top level under the name "Dockerfile"
-        dfinfo = tarfile.TarInfo('Dockerfile')
-        dfinfo.size = len(dockerfile.getvalue())
-        dockerfile.seek(0)
-        t.addfile(dfinfo, dockerfile)
-
-        # Open all of the context files and add them to the tarfile.
-        for file_name in context_files:
-            with open(file_name) as file_object:
-                file_info = t.gettarinfo(fileobj=file_object)
-                t.addfile(file_info, file_object)
-
-        t.close()
-        f.seek(0)
-        return f
+        return '%s.%s' % (base, time_str)

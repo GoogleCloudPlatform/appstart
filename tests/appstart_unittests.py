@@ -11,6 +11,7 @@ import unittest
 import docker
 
 from appstart import container_sandbox
+from appstart import utils
 
 import fake_docker
 import fake_requests
@@ -25,7 +26,8 @@ class TestBase(unittest.TestCase):
         docker.Client = fake_docker.FakeDockerClient
         requests.get = fake_requests.fake_get
         test_directory = os.path.dirname(os.path.realpath(__file__))
-        self.sandbox = container_sandbox.ContainerSandbox(test_directory)
+        conf_file = os.path.join(test_directory, 'app.yaml')
+        self.sandbox = container_sandbox.ContainerSandbox(conf_file)
 
     def tearDown(self):
         """Restore docker.Client and requests.get."""
@@ -59,7 +61,7 @@ class CreateContainersTest(TestBase):
         """Test behavior in the case of a failed build."""
         bad_build_res = fake_docker.FAILED_BUILD_RES
         with self.assertRaises(docker.errors.DockerException):
-            self.sandbox.log_and_check_build_results(bad_build_res, 't')
+            utils.log_and_check_build_results(bad_build_res, 't')
 
 
 class ExitTests(TestBase):

@@ -30,11 +30,12 @@ class SystemTests(unittest.TestCase):
         This depends on a properly set up docker environment.
         """
         test_directory = os.path.dirname(os.path.realpath(__file__))
+        conf_file = os.path.join(test_directory, 'app.yaml')
 
         # Use temporary storage, generating unique name with a timestamp.
         temp_storage_path = '/tmp/storage/%s' % str(time.time())
         cls.sandbox = container_sandbox.ContainerSandbox(
-            test_directory,
+            conf_file,
             storage_path=temp_storage_path)
 
         # Set up the containers
@@ -72,9 +73,7 @@ def make_endpoint_test(endpoint, handler):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    logging.getLogger('requests').setLevel(logging.WARNING)
-
+    logging.getLogger('appstart').setLevel(logging.INFO)
     # Get all the endpoints from the test app and turn them into tests.
     for ep, handlr in services_test_app.urls:
         endpoint_test = make_endpoint_test(ep, handlr)

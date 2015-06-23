@@ -10,9 +10,11 @@ containers.
 
 import argparse
 import logging
+import sys
 import time
 
 from appstart import container_sandbox
+from appstart import devappserver_init
 
 
 def main():
@@ -22,34 +24,66 @@ def main():
     port bindings, and volume bindings. The devappserver image runs a
     standalone api server.
     """
-    logging.basicConfig(
-        format='%(levelname)-8s %(asctime)s '
-        '%(filename)s:%(lineno)s] %(message)s')
     logging.getLogger('appstart').setLevel(logging.INFO)
-    
-    args = make_parser().parse_args()
-    try:
-        with container_sandbox.ContainerSandbox(**vars(args)):
-            while True:
-                time.sleep(10000)
-    except KeyboardInterrupt:
-        logging.info('Appstart terminated by user.')
+    if 'init' in sys.argv:
+        args = make_init_parser().parse_args(sys.argv[2:])
+        if args.source == 'local':
+            devappserver_init.base_image_from_root()
+        else:
+            # It might be preferable to add an init version
+            # where the devappserver Dockerfile pulls the whole
+            # gcloud sdk in.
+            print ('NOT SUPPORTED: Building the dev_appserver'
+                   'from an external source is currently not supported.')
+    else:
+        args = make_appstart_parser().parse_args()
+        try:
+            with container_sandbox.ContainerSandbox(**vars(args)):
+                while True:
+                    time.sleep(10000)
+        except KeyboardInterrupt:
+            logging.info('Appstart terminated by user.')
 
 
-def make_parser():
+def make_init_parser():
+    """Make an argument parser for the init subcommand.
+
+    Returns:
+        (argparse.ArgumentParser) a parser for the init subcommand.
+    """
+    parser = argparse.ArgumentParser(
+        description='Build the base devappserver image.')
+    parser.add_argument('--source',
+                        default='local',
+                        choices=['local', 'remote'],
+                        help='Specify the location of the gcloud '
+                        'sdk source.')
+    return parser
+
+
+def make_appstart_parser():
     """Make an argument parser to take in command line arguments.
 
     Returns:
-        (argparse.ArgumentParser) the parser
+        (argparse.ArgumentParser) the parser.
     """
     parser = argparse.ArgumentParser(
-        description='Wrapper to run a managed vm container')
+        description='Wrapper to run a managed vm container. If '
+        'using for the first time, run \'appstart init\' '
+        'to generate a devappserver base image.')
     parser.add_argument('--image_name',
                         default=None,
                         help='The name of the docker image to run. '
                         'If the docker image is specified, no '
                         'new docker image will be built from the '
                         'application\'s Dockerfile.')
+    parser.add_argument('--run_api_server',
+                        choices=['True', 'true', 'False', 'false'],
+                        nargs=1,
+                        default='True',
+                        action=BoolAction,
+                        help='If false, appstart will not start the '
+                        'api server.')
     parser.add_argument('--app_port',
                         default=8080,
                         type=int,
@@ -74,27 +108,25 @@ def make_parser():
                         'files should get stored. This includes '
                         'the Datastore, logservice files, Google Cloud '
                         'Storage files, etc. ')
-    parser.add_argument('--config_file_name',
-                        default='app.yaml',
-                        help='The name of the application\'s config file. '
-                        'Non-Java applications should have a yaml config '
-                        'file in the application\'s root directory. Java '
-                        'applications that are built on the java-compat '
-                        'docker image should have an xml file in the '
-                        'WEB-INF directory, which resides in the root '
-                        'of the WAR archive. ')
 
-    # The port that the proxy should bind to inside the container.
-    parser.add_argument('--internal_proxy_port',
+    # The port that the admin panel should bind to inside the container.
+    parser.add_argument('--internal_admin_port',
                         type=int,
-                        default=20000,
+                        default=32768,
                         help=argparse.SUPPRESS)
 
     # The port that the api server should bind to inside the container.
     parser.add_argument('--internal_api_port',
                         type=int,
-                        default=10000,
+                        default=32769,
                         help=argparse.SUPPRESS)
+
+    # The port that the proxy should bind to inside the container.
+    parser.add_argument('--internal_proxy_port',
+                        type=int,
+                        default=32770,
+                        help=argparse.SUPPRESS)
+
     parser.add_argument('--log_path',
                         default='/tmp/log/appengine',
                         help='The location where this container will '
@@ -106,10 +138,9 @@ def make_parser():
                         action=BoolAction,
                         help='If false, docker will not use '
                         'the cache during image builds.')
-    parser.add_argument('application_directory',
-                        help='The root directory of the application. '
-                        'This directory should contain a Dockerfile '
-                        'if image_name is not specified.')
+    parser.add_argument('config_file',
+                        help='The relative or absolute path to the '
+                        'application\'s .yaml or .xml file.')
     return parser
 
 
