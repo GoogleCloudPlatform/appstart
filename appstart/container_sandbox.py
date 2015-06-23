@@ -10,9 +10,11 @@ system tests in this manner.
 # This file conforms to the external style guide
 # pylint: disable=bad-indentation, g-bad-import-order
 
+import contextlib
+import httplib
 import io
 import os
-import requests
+import socket
 import sys
 import time
 import urlparse
@@ -60,11 +62,11 @@ class ContainerSandbox(object):
     # pylint: disable=too-many-arguments
 
     def __init__(self,
-                 config_file,
-                 admin_port=8000,
-                 application_id='temp',
-                 app_port=8080,
+                 config_file=None,
                  image_name=None,
+                 application_id=None,
+                 app_port=8080,
+                 admin_port=8000,
                  internal_admin_port=32768,
                  internal_api_port=32769,
                  internal_proxy_port=32770,
@@ -75,8 +77,9 @@ class ContainerSandbox(object):
         """Get the sandbox ready to construct and run the containers.
 
         Args:
-            config_file: (basestring) The relative or full path
-                to the config_file of the application. If image_name is
+            config_file: (basestring or None) The relative or full path
+                to the config_file of the application. At least one of
+                image_name and config_file must be specified. If image_name is
                 not specified, this path will be used to help find the
                 Dockerfile and build the application container.
                 Therefore, if image_name is not specified, there should
@@ -96,10 +99,9 @@ class ContainerSandbox(object):
                    archive.
                 3) There must be a web.xml file in the same
                    directory as the appengine-web.xml file.
-            admin_port: (int) The port on the docker server host that
-                should be mapped to the admin server, which runs inside
-                the devappserver container. The admin panel will be
-                accessible through this port.
+            image_name: (basestring or None) If specified, the sandbox
+                will run the image associated with image_name instead of
+                building an image from the specified application_directory.
             application_id: (basestring) The application ID is
                 the unique "appengine application ID" that the app is
                 identified by, and can be found in the developer's
@@ -113,9 +115,10 @@ class ContainerSandbox(object):
             app_port: (int) The port on the docker host that should be
                 mapped to the application. The application will be
                 accessible through this port.
-            image_name: (basestring or None) If specified, the sandbox
-                will run the image associated with image_name instead of
-                building an image from the specified application_directory.
+            admin_port: (int) The port on the docker server host that
+                should be mapped to the admin server, which runs inside
+                the devappserver container. The admin panel will be
+                accessible through this port.
             internal_admin_port: (int) The port INSIDE the devappserver
                 container that the admin panel binds to. Because this
                 is internal to the container, it can be defaulted.
@@ -144,9 +147,11 @@ class ContainerSandbox(object):
             use_cache: (bool) Whether or not to use the cache when building
                 images.
         """
+        self.cur_time = time.strftime(TIME_FMT)
         self.devappserver_container = {}
         self.app_container = {}
-        self.app_id = application_id
+        self.app_id = (application_id or
+                       time.strftime('%s'))
         self.internal_api_port = internal_api_port
         self.internal_proxy_port = internal_proxy_port
         self.internal_admin_port = internal_admin_port
@@ -158,18 +163,23 @@ class ContainerSandbox(object):
         self.dclient = utils.get_docker_client()
         self.nocache = not use_cache
         self.run_devappserver = run_api_server
-        self.conf_path = os.path.abspath(config_file)
-        self.verify_structure(self.conf_path)
-        self.app_dir = (self.app_directory_from_config(self.conf_path)
-                        if not image_name else None)
 
-        self.conf_name = os.path.basename(self.conf_path)
-        self.cur_time = time.strftime(TIME_FMT)
+        if config_file:
+            self.conf_path = os.path.abspath(config_file)
+            self.verify_structure(self.conf_path)
+            self.app_dir = (self.app_directory_from_config(self.conf_path)
+                            if not image_name else None)
+
+        else:
+            assert image_name, ('At least one of config_file and '
+                                'image_name must be specified.')
+            self.conf_path = os.path.join(os.path.dirname(__file__),
+                                          'app.yaml')
 
         # For Java apps, the xml file must be offset by WEB-INF.
         # Otherwise, devappserver will think that it's a non-java app.
-        is_java_app = self.conf_name.endswith('.xml')
-        self.internal_offset = JAVA_OFFSET if is_java_app else ''
+        self.das_offset = (JAVA_OFFSET if self.conf_path.endswith('.xml')
+                           else '')
 
     def __enter__(self):
         self.start()
@@ -209,8 +219,9 @@ class ContainerSandbox(object):
             das_env = {'APP_ID': self.app_id,
                        'PROXY_PORT': self.internal_proxy_port,
                        'API_PORT': self.internal_api_port,
-                       'APP_YAML_FILE': os.path.join(self.internal_offset,
-                                                     self.conf_name)}
+                       'CONFIG_FILE': os.path.join(
+                           self.das_offset,
+                           os.path.basename(self.conf_path))}
             devappserver_image = self.build_devappserver_image()
             devappserver_container_name = (
                 self.make_timestamped_name('devappserver',
@@ -276,12 +287,13 @@ class ContainerSandbox(object):
 
         # If devappserver is running, hook up the app to it.
         if self.run_devappserver:
-            ports = [DEFAULT_APPLICATION_PORT]
-            port_bindings = {DEFAULT_APPLICATION_PORT: self.port}
             network_mode = ('container:%s' %
                             self.devappserver_container.get('Id'))
+            ports = port_bindings = None
         else:
-            ports = port_bindings = network_mode = None
+            ports = [DEFAULT_APPLICATION_PORT]
+            port_bindings = {DEFAULT_APPLICATION_PORT: self.port}
+            network_mode = None
 
         app_hconf = docker.utils.create_host_config(
             port_bindings=port_bindings,
@@ -360,21 +372,23 @@ class ContainerSandbox(object):
             RuntimeError: If the application server doesn't
                 start after MAX_ATTEMPTS to reach it on 8080.
         """
-        attempt = 1
-        while True:
-            get_logger().info('Checking if server running: attempt #%i',
-                              attempt)
-            try:
-                requests.get('http://%s:%s/' %
-                             (self.get_docker_host(), self.port))
-                break
-            except requests.exceptions.ConnectionError:
-                pass
 
-            attempt += 1
-            if attempt > MAX_ATTEMPTS:
-                raise RuntimeError('The application server timed out.')
-            time.sleep(1)
+        con = httplib.HTTPConnection(self.get_docker_host(), self.port)
+        attempt = 1
+
+        with contextlib.closing(con):
+            while True:
+                get_logger().info('Checking if server running: attempt #%i',
+                                  attempt)
+                try:
+                    con.connect()
+                    break
+                except (socket.error, httplib.HTTPException):
+                    attempt += 1
+
+                if attempt > MAX_ATTEMPTS:
+                    raise RuntimeError('The application server timed out.')
+                time.sleep(1)
 
     def build_app_image(self):
         """Build the app image from the Dockerfile in app_dir.
@@ -413,7 +427,7 @@ class ContainerSandbox(object):
         ADD %(path)s/* %(dest)s
         """ %{'das_repo': DEVAPPSERVER_IMAGE,
               'path': os.path.dirname(self.conf_path),
-              'dest': os.path.join('/app', self.internal_offset)}
+              'dest': os.path.join('/app', self.das_offset)}
 
         # Construct a file-like object from the Dockerfile.
         dockerfile_obj = io.BytesIO(dockerfile.encode('utf-8'))

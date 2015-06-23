@@ -49,6 +49,8 @@ image like this: ::
 
 This command will take a while to complete (1-2 min).
 
+Default invocation
+---------------------------------------------------------------------------
 The appstart script can be use to start the application from the command
 line. It is invoked as follows: ::
 
@@ -58,16 +60,25 @@ line. It is invoked as follows: ::
 file, which is either 'appengine-web.xml' or a .yaml file. For Java
 standard runtime applications, the 'appengine-web.xml' file must be inside
 WEB-INF, along with a web.xml file. For all other applications, the .yaml
-file must be in the root directory.
+file must be in the root directory. By default, Appstart will attempt
+to locate the Dockerfile in the application's root directory and use it to
+build the application's image.
 
-The --image_name flag can be used to tell Appstart which image to run like
-this: ::
+Specifying an image
+---------------------------------------------------------------------------
+The --image_name flag can be used to specify an existing image rather than
+having Appstart build one from the Dockerfile. When --image_name is
+specified, a Dockerfile is not needed: ::
 
     $ appstart <PATH_TO_CONFIG_FILE> --image_name=<IMAGE_NAME>
 
-If --image_name is not specified, the application's root directory MUST
-contain a Dockerfile. Appstart will attempt to build an image for the
-application using this Dockerfile.
+Turning off the api server
+---------------------------------------------------------------------------
+By default, Appstart runs an api server so that the application can make
+calls to Google's services (datastore, taskqueue, logging, etc). If you
+don't consume these services, you can run appstart like this: ::
+
+    $ appstart <PATH_TO_CONFIG_FILE> --run_api_server=false
 
 Under the hood
 ===========================================================================

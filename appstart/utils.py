@@ -26,6 +26,10 @@ LINUX_DOCKER_HOST = '/var/run/docker.sock'
 # Logger that is shared accross all components of appstart
 _logger = None
 
+# Logging format
+FMT = '[%(levelname).1s: %(asctime)s] %(message)s'
+DATE_FMT = '%H:%M:%S'
+
 
 def get_logger():
     """Configures the appstart logger if it doesn't exist yet.
@@ -39,9 +43,7 @@ def get_logger():
         _logger = logging.getLogger('appstart')
         sh = logging.StreamHandler()
         sh.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(levelname)-8s %(asctime)s '
-                                      '%(filename)s:%(lineno)s] '
-                                      '%(message)s')
+        formatter = logging.Formatter(fmt=FMT, datefmt=DATE_FMT)
         sh.setFormatter(formatter)
         _logger.addHandler(sh)
     return _logger

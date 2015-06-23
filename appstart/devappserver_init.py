@@ -3,7 +3,6 @@
 # This file follows the external style guide.
 # pylint: disable=bad-indentation, g-bad-import-order
 
-import logging
 import os
 
 from appstart import utils
@@ -16,16 +15,32 @@ DAS_REL_PATH = '../platform/google_appengine/dev_appserver.py'
 # The name of the gcloud executable
 GCLOUD_NAME = 'gcloud'
 
+# The offset of the gcloud cli from the root of the gcloud sdk.
+GCLOUD_OFFSET = 'bin'
+
 # Directories needed for devappserver build (speeds up build context)
 # Paths are relative to the sdk root.
 TARGET_DIRS = ['platform/google_appengine', 'lib/docker']
 
 
-def base_image_from_root():
-    """Builds devappserver base image from local copy of gcloud."""
+def base_image_from_root(source=None):
+    """Builds devappserver base image from local copy of gcloud.
+
+    Args:
+        source: (basestring or None) The path to a gcloud sdk root.
+
+    Raises:
+        IOError: If the sdk path cannot be resolved.
+    """
 
     # Get path to the gcloud sdk's root.
-    sdk_path = sdk_path_from_env()
+    if source:
+        bin_path = os.path.join(source, GCLOUD_OFFSET)
+        if not is_gcloud_bin_path(bin_path):
+            raise IOError('Could not find gcloud SDK at {0}'.format(source))
+        sdk_path = source
+    else:
+        sdk_path = sdk_path_from_env()
 
     dclient = utils.get_docker_client()
 
@@ -60,24 +75,42 @@ def base_image_from_root():
     utils.log_and_check_build_results(res, DEVAPPSERVER_IMAGE)
 
 
+def is_gcloud_bin_path(path):
+    """Determine if path is the gcloud sdk's bin directory.
+
+    Args:
+        path: (basestring) The path to be checked.
+
+    Returns:
+        (bool) Whether or not path is a gcloud bin directory.
+    """
+    path = os.path.abspath(path)
+    return (os.path.exists(os.path.join(path, GCLOUD_NAME)) and
+            os.path.basename(path) == 'bin' and
+            os.path.exists(os.path.join(path, DAS_REL_PATH)))
+
+
 def sdk_path_from_env():
     """Get the gcloud sdk root from the PATH environment variable.
 
     Returns:
         (basestring) the absolute path to the sdk root.
+
+    Raises:
+        IOError: if the gcloud sdk root cannot be found.
     """
     paths = os.environ['PATH'].split(os.pathsep)
 
     sdk_path = None
     for path in paths:
-        is_sdk = (os.path.exists(os.path.join(path, GCLOUD_NAME)) and
-                  os.path.basename(path) == 'bin' and
-                  os.path.exists(os.path.join(path, DAS_REL_PATH)))
-        if is_sdk:
+        if is_gcloud_bin_path(path):
             sdk_path = os.path.abspath(os.path.join(path, '..'))
             break
 
     if sdk_path is None:
-        logging.error('Could not find gcloud sdk path.')
+        raise IOError('Could not find gcloud sdk path. '
+                      'If you have installed the gcloud sdk, '
+                      'try supplying a path to the sdk root with '
+                      '--source.')
 
     return sdk_path
