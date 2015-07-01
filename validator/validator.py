@@ -19,15 +19,18 @@ import runtime_contract
 def main():
     """Perform validation."""
     logging.getLogger('appstart').setLevel(logging.INFO)
-    sandbox_kwargs = vars(parsing.make_appstart_parser().parse_args())
+    parser = parsing.make_appstart_parser()
+    parser.add_argument('--log_file',
+                        default=None,
+                        help='Logfile to collect validation results.')
+    args = vars(parser.parse_args())
+    logfile = args.get('log_file')
+    args.pop('log_file', None)
+    validator = contract.ContractValidator(args, runtime_contract)
 
-    validator = contract.ContractValidator(sandbox_kwargs,
-                                           runtime_contract.get_contract())
-
-    result = validator.validate(contract.WARNING)
+    result = validator.validate(contract.FATAL, logfile)
     if not result:
         sys.exit('Validation failed')
-
 
 if __name__ == '__main__':
     main()

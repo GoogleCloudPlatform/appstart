@@ -264,8 +264,8 @@ class TarWrapper(object):
 
         return files, dirs
 
-    def read_file(self, path):
-        """Return the contents of a file from within archive.
+    def get_file(self, path):
+        """Return a file-like object from within the tar archive.
 
         Args:
             path: (basestring) The path to the file, relative to
@@ -282,7 +282,7 @@ class TarWrapper(object):
         tinfo = self.tarfile.getmember(path)
         if not tinfo.isfile():
             raise ValueError('"{0}" is not a file.'.format(path))
-        return self.tarfile.extractfile(tinfo).read()
+        return self.tarfile.extractfile(tinfo)
 
 
 def find_image(image_name):
