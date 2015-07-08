@@ -1,5 +1,7 @@
 # Copyright 2015 Google Inc. All Rights Reserved.
+
 """Helper functions for components of appstart."""
+
 # This file follows the external style guide.
 # pylint: disable=bad-indentation, g-bad-import-order
 
@@ -120,6 +122,7 @@ def make_tar_build_context(dockerfile, context_files):
             (tempfile.NamedTemporaryFile) a temporary tarfile
             representing the docker build context.
         """
+
         f = tempfile.NamedTemporaryFile()
         t = tarfile.open(mode='w', fileobj=f)
 
@@ -144,6 +147,82 @@ def make_tar_build_context(dockerfile, context_files):
         return f
 
 
+class TarWrapper(object):
+    """A convenience wrapper around a tar archive.
+
+    Helps to list contents of directories and read contents of files.
+    """
+
+    def __init__(self, tar_file):
+        """Initializer for TarWrapper."""
+        self.tarfile = tar_file
+
+    def list(self, path):
+        """Return the contents of dir_path as a list of file/directory names.
+
+        Args:
+            path: (basestring) The path to the directory,
+                relative to the root of the tar archive.
+
+        Raises:
+            ValueError: If dir_path resolves to something other than
+                a directory.
+
+        Returns:
+            ([basestring, ...], [basestring, ...])
+            A tuple of two lists, collectively representing the files and
+            directories contained within the directory specified by dir_path.
+            The first element of the tuple is a list of files and the second
+            a list of directories.
+        """
+        if not path.endswith('/'):
+            path.append('/')
+
+        tinfo = self.tarfile.getmember(path)
+        if not tinfo.isdir():
+            raise ValueError('"{0}" is not a directory.'.format(path))
+
+        files = []
+        dirs = []
+
+        # Find all files rooted at path.
+        names = [n for n in self.tarfile.getnames() if n.startswith(path)]
+
+        # Calculate the number of components in the path.
+        path_len = len(path.strip(os.sep).split(os.sep))
+
+        for name in names:
+            # If the name is one component longer, it must be directly inside
+            # the directory specified by path (as opposed to being inside a
+            # hierarchy of subdirectories that begin at path).
+            if len(name.split(os.sep)) - path_len == 1:
+                if self.tarfile.getmember(name).isfile():
+                    files.append(os.path.basename(name))
+                elif self.tarfile.getmember(name).isdir():
+                    dirs.append(os.path.basename(name))
+
+        return files, dirs
+
+    def read_file(self, path):
+        """Return the contents of a file from within archive.
+
+        Args:
+            path: (basestring) The path to the file, relative to
+                the root of the tar archive.
+
+        Raises:
+            ValueError: If path resolves to something other than
+                a file.
+
+        Returns:
+            (basestring) The contents of the file.
+        """
+        tinfo = self.tarfile.getmember(path)
+        if not tinfo.isfile():
+            raise ValueError('"{0}" is not a file.'.format(path))
+        return self.tarfile.extractfile(tinfo).read()
+
+
 def log_and_check_build_results(build_res, image_name):
         """Log the results of a docker build.
 
@@ -156,7 +235,7 @@ def log_and_check_build_results(build_res, image_name):
         Raises:
             docker.errors.DockerException: if the build failed.
         """
-        get_logger().info('-' * 20 + '  BUILDING IMAGE  ' + '-' * 20)
+        get_logger().info('  BUILDING IMAGE  '.center(80, '-'))
         get_logger().info('IMAGE  : %s', image_name)
 
         success = True
@@ -177,7 +256,9 @@ def log_and_check_build_results(build_res, image_name):
                     logmsg = line['errorDetail']['message'].strip()
                     get_logger().error(logmsg)
         finally:
-            get_logger().info('-' * 58)
+            get_logger().info('-' * 80)
 
+        # Docker build doesn't raise exceptions, so raise one here if the
+        # build was not successful.
         if not success:
             raise docker.errors.DockerException('Image build failed.')

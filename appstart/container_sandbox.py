@@ -1,4 +1,5 @@
 # Copyright 2015 Google Inc. All Rights Reserved.
+
 """A ContainerSandbox manages the application and devappserver containers.
 
 This includes their creation, termination, and destruction.
@@ -7,20 +8,18 @@ the interior of the "with" statement, the user interact with the containers
 via the docker api. It may also be beneficial for the user to perform
 system tests in this manner.
 """
+
 # This file conforms to the external style guide
 # pylint: disable=bad-indentation, g-bad-import-order
 
-import contextlib
-import httplib
 import io
 import os
-import socket
 import sys
 import time
-import urlparse
 
 import docker
 
+import container
 import utils
 from utils import get_logger
 
@@ -70,10 +69,11 @@ class ContainerSandbox(object):
                  internal_admin_port=32768,
                  internal_api_port=32769,
                  internal_proxy_port=32770,
-                 log_path='/tmp/log/appengine',
+                 log_path=None,
                  run_api_server=True,
-                 storage_path='/tmp/appengine/storage',
-                 use_cache=True):
+                 storage_path='/tmp/app_engine/storage',
+                 use_cache=True,
+                 timeout=MAX_ATTEMPTS):
         """Get the sandbox ready to construct and run the containers.
 
         Args:
@@ -130,11 +130,12 @@ class ContainerSandbox(object):
             internal_proxy_port: (int) The port INSIDE the devappserver
                 container that the proxy should bind to.
                 ~Same disclaimer as the one for internal_admin_port.~
-            log_path: (basetring) The path where the application's
+            log_path: (basestring or None) The path where the application's
                 logs should be collected. Note that the application's logs
                 will be collected EXTERNALLY (ie they will collect in the
                 docker host's file system) and log_path specifies where
-                these logs should go.
+                these logs should go. If log_path is None, a timestamped
+                name will be generated for the log directory.
             run_api_server: (bool) Whether or not to run the api server.
                 If this argument is set to false, the sandbox won't start
                 a devappserver.
@@ -146,10 +147,10 @@ class ContainerSandbox(object):
                 is intended to persist.
             use_cache: (bool) Whether or not to use the cache when building
                 images.
+            timeout: (int) How many seconds to wait for the application
+                container to start.
         """
         self.cur_time = time.strftime(TIME_FMT)
-        self.devappserver_container = {}
-        self.app_container = {}
         self.app_id = (application_id or
                        time.strftime('%s'))
         self.internal_api_port = internal_api_port
@@ -157,12 +158,18 @@ class ContainerSandbox(object):
         self.internal_admin_port = internal_admin_port
         self.port = app_port
         self.storage_path = storage_path
-        self.log_path = log_path
+        self.log_path = (
+            log_path or self.make_timestamped_name(
+                '/tmp/log/app_engine/app_logs',
+                self.cur_time))
         self.image_name = image_name
         self.admin_port = admin_port
         self.dclient = utils.get_docker_client()
+        self.devappserver_container = None
+        self.app_container = None
         self.nocache = not use_cache
         self.run_devappserver = run_api_server
+        self.timeout = timeout
 
         if config_file:
             self.conf_path = os.path.abspath(config_file)
@@ -243,7 +250,8 @@ class ContainerSandbox(object):
                 }
             )
 
-            self.devappserver_container = self.dclient.create_container(
+            self.devappserver_container = container.Container(
+                self.dclient,
                 name=devappserver_container_name,
                 image=devappserver_image,
                 ports=[self.internal_proxy_port, self.internal_admin_port],
@@ -252,7 +260,7 @@ class ContainerSandbox(object):
                 environment=das_env
             )
 
-            self.dclient.start(self.devappserver_container.get('Id'))
+            self.devappserver_container.start()
             get_logger().info('Starting container: %s',
                               devappserver_container_name)
 
@@ -288,7 +296,7 @@ class ContainerSandbox(object):
         # If devappserver is running, hook up the app to it.
         if self.run_devappserver:
             network_mode = ('container:%s' %
-                            self.devappserver_container.get('Id'))
+                            self.devappserver_container.get_id())
             ports = port_bindings = None
         else:
             ports = [DEFAULT_APPLICATION_PORT]
@@ -303,7 +311,8 @@ class ContainerSandbox(object):
 
         )
 
-        self.app_container = self.dclient.create_container(
+        self.app_container = container.Container(
+            self.dclient,
             name=app_container_name,
             image=app_image,
             ports=ports,
@@ -315,14 +324,11 @@ class ContainerSandbox(object):
         # Start as a shared network container, putting the application
         # on devappserver's network stack. (If devappserver is not
         # running, network_mode is None).
-        self.dclient.start(self.app_container.get('Id'),
-                           network_mode=network_mode)
+        self.app_container.start(network_mode=network_mode)
 
         get_logger().info('Starting container: %s', app_container_name)
         self.wait_for_start()
-        get_logger().info('Your application is live. Access it at: %s:%s',
-                          self.get_docker_host(),
-                          str(self.port))
+        self.app_container.stream_logs()
 
     def stop(self):
         """Remove containers to clean up the environment."""
@@ -344,51 +350,50 @@ class ContainerSandbox(object):
 
     def stop_and_remove_containers(self):
         """Stop and remove application containers."""
-        for cont in [self.devappserver_container, self.app_container]:
-            if 'Id' in cont:
-                cont_id = cont.get('Id')
-                if cont_id is None:
-                    continue
-                get_logger().info('Stopping %s', cont_id)
-                self.dclient.kill(cont_id)
+        for cont in [self.app_container, self.devappserver_container]:
+            if  cont:
+                get_logger().info('Stopping %s', cont.get_id())
+                cont.kill()
 
-                get_logger().info('Removing %s', cont_id)
-                cont['Id'] = None
-                self.dclient.remove_container(cont_id)
-
-    def get_docker_host(self):
-        """Get hostname of machine where the docker client is running.
-
-        Returns:
-            (basestring) The hostname of the machine where the docker
-            client is running.
-        """
-        return urlparse.urlparse(self.dclient.base_url).hostname
+                get_logger().info('Removing %s', cont.get_id())
+                cont.remove()
 
     def wait_for_start(self):
         """Wait for the app container to start.
 
         Raises:
             RuntimeError: If the application server doesn't
-                start after MAX_ATTEMPTS to reach it on 8080.
+                start after timeout reach it on 8080.
         """
-
-        con = httplib.HTTPConnection(self.get_docker_host(), self.port)
         attempt = 1
+        get_logger().info('Checking if server running')
+        graphical = sys.stdout.isatty()
 
-        with contextlib.closing(con):
-            while True:
-                get_logger().info('Checking if server running: attempt #%i',
-                                  attempt)
-                try:
-                    con.connect()
-                    break
-                except (socket.error, httplib.HTTPException):
-                    attempt += 1
+        if graphical:
+            sys.stdout.write('Waiting for application ')
+            sys.stdout.flush()
 
-                if attempt > MAX_ATTEMPTS:
-                    raise RuntimeError('The application server timed out.')
-                time.sleep(1)
+        while True:
+            if graphical:
+                sys.stdout.write('.')
+                sys.stdout.flush()
+            if self.app_container.ping():
+                if graphical:
+                    sys.stdout.write('\n')
+                    sys.stdout.flush()
+                break
+
+            attempt += 1
+            if attempt > self.timeout:
+                raise RuntimeError('The application server timed out.')
+
+            time.sleep(1)
+
+        host = (self.devappserver_container.host if self.run_devappserver
+                else self.app_container.host)
+
+        get_logger().info('Your application is live. '
+                          'Access it at: {0}:{1}'.format(host, str(self.port)))
 
     def build_app_image(self):
         """Build the app image from the Dockerfile in app_dir.

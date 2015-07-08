@@ -75,7 +75,7 @@ def make_appstart_parser():
                         help=argparse.SUPPRESS)
 
     parser.add_argument('--log_path',
-                        default='/tmp/log/appengine',
+                        default=None,
                         help='The location where this container will '
                         'output logs.')
     parser.add_argument('--use-cache',
@@ -85,6 +85,11 @@ def make_appstart_parser():
                         action=BoolAction,
                         help='If false, docker will not use '
                         'the cache during image builds.')
+    parser.add_argument('--timeout',
+                        type=int,
+                        default=30,
+                        help='How many seconds to wait for the application '
+                        'to start listening on port 8080.')
     parser.add_argument('config_file',
                         nargs='?',
                         default=None,

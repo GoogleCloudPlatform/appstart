@@ -30,16 +30,22 @@ class SystemTests(unittest.TestCase):
         This depends on a properly set up docker environment.
         """
         test_directory = os.path.dirname(os.path.realpath(__file__))
-        conf_file = os.path.join(test_directory, 'app.yaml')
+        cls.conf_file = os.path.join(test_directory, 'app.yaml')
 
         # Use temporary storage, generating unique name with a timestamp.
         temp_storage_path = '/tmp/storage/%s' % str(time.time())
         cls.sandbox = container_sandbox.ContainerSandbox(
-            conf_file,
+            cls.conf_file,
             storage_path=temp_storage_path)
 
         # Set up the containers
         cls.sandbox.start()
+
+    def test_copy(self):
+        internal_yaml = self.sandbox.app_container.read_file('/app/app.yaml')
+        yaml = open(self.conf_file, 'r').read()
+
+        self.assertEqual(internal_yaml, yaml)
 
     @classmethod
     def tearDownClass(cls):
@@ -61,7 +67,7 @@ def make_endpoint_test(endpoint, handler):
     def _endpoint_test(self):
         """Hit the endpoint and assert that it responds with 200 OK."""
         res = requests.get('http://%s:%i%s' %
-                           (self.sandbox.get_docker_host(),
+                           (self.sandbox.devappserver_container.host,
                             self.sandbox.port,
                             endpoint))
         self.assertEqual(res.status_code,
