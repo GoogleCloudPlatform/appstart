@@ -167,6 +167,7 @@ class TarWrapper(object):
         Raises:
             ValueError: If dir_path resolves to something other than
                 a directory.
+            KeyError: If path cannot be found.
 
         Returns:
             ([basestring, ...], [basestring, ...])
@@ -213,6 +214,7 @@ class TarWrapper(object):
         Raises:
             ValueError: If path resolves to something other than
                 a file.
+            KeyError: If path cannot be found.
 
         Returns:
             (basestring) The contents of the file.
