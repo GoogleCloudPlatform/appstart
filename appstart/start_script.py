@@ -39,8 +39,7 @@ def main():
     """
     logging.getLogger('appstart').setLevel(logging.INFO)
     if 'init' in sys.argv:
-        args = vars(parsing.make_init_parser().parse_args(sys.argv[2:]))
-        devappserver_init.base_image_from_root(**args)
+        devappserver_init.base_image_from_dockerfile()
     else:
         args = parsing.make_appstart_parser().parse_args()
         try:
