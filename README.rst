@@ -20,6 +20,9 @@ application container. The purpose of appstart is to provide a way for
 custom runtime VMs to be started locally after the docker library is
 removed from devappserver.
 
+This is not an official Google product (experimental or otherwise), it is
+just code that happens to be owned by Google.
+
 Installation
 ===========================================================================
 From its root directory, appstart can be installed like so: ::
