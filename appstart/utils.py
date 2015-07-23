@@ -176,12 +176,12 @@ class TarWrapper(object):
             The first element of the tuple is a list of files and the second
             a list of directories.
         """
-        if not path.endswith('/'):
-            path.append('/')
-
-        tinfo = self.tarfile.getmember(path)
+        tinfo = self.tarfile.getmember(path.lstrip('/'))
         if not tinfo.isdir():
             raise ValueError('"{0}" is not a directory.'.format(path))
+
+        if not path.endswith('/'):
+            path += '/'
 
         files = []
         dirs = []

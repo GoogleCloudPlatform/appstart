@@ -162,3 +162,14 @@ class Container(object):
 
         # Wrap the TarFile for more user-friendliness
         return utils.TarWrapper(tarfile.open(fileobj=fileobj))
+
+
+class ApplicationContainer(Container):
+    """Explicitly give the application container a configuration file.
+
+    This will be useful for validation.
+    """
+
+    def __init__(self, app_config, *args, **kwargs):
+        super(ApplicationContainer, self).__init__(*args, **kwargs)
+        self.configuration = app_config

@@ -19,6 +19,7 @@ import time
 
 import docker
 
+import configuration
 import container
 import utils
 from utils import get_logger
@@ -28,12 +29,6 @@ DEVAPPSERVER_IMAGE = 'appstart_devappserver_base'
 
 # Maximum attempts to health check application container.
 MAX_ATTEMPTS = 30
-
-# Yaml file error message
-YAML_MSG = 'The yaml file must be in the application\'s root directory.'
-
-# XML file error message
-XML_MSG = 'The xml file must be in the WEB-INF directory.'
 
 # Default port that the application is expected to listen on inside
 # the application container.
@@ -173,10 +168,10 @@ class ContainerSandbox(object):
 
         if config_file:
             self.conf_path = os.path.abspath(config_file)
-            self.verify_structure(self.conf_path)
+            self.application_configuration = (
+                configuration.ApplicationConfiguration(self.conf_path))
             self.app_dir = (self.app_directory_from_config(self.conf_path)
                             if not image_name else None)
-
         else:
             assert image_name, ('At least one of config_file and '
                                 'image_name must be specified.')
@@ -185,7 +180,7 @@ class ContainerSandbox(object):
 
         # For Java apps, the xml file must be offset by WEB-INF.
         # Otherwise, devappserver will think that it's a non-java app.
-        self.das_offset = (JAVA_OFFSET if self.conf_path.endswith('.xml')
+        self.das_offset = (JAVA_OFFSET if self.application_configuration.is_java
                            else '')
 
     def __enter__(self):
@@ -311,7 +306,8 @@ class ContainerSandbox(object):
 
         )
 
-        self.app_container = container.Container(
+        self.app_container = container.ApplicationContainer(
+            self.application_configuration,
             self.dclient,
             name=app_container_name,
             image=app_image,
@@ -352,10 +348,11 @@ class ContainerSandbox(object):
         """Stop and remove application containers."""
         for cont in [self.app_container, self.devappserver_container]:
             if  cont:
-                get_logger().info('Stopping %s', cont.get_id())
+                cont_id = cont.get_id()
+                get_logger().info('Stopping %s', cont_id)
                 cont.kill()
 
-                get_logger().info('Removing %s', cont.get_id())
+                get_logger().info('Removing %s', cont_id)
                 cont.remove()
 
     def wait_for_start(self):
@@ -422,7 +419,7 @@ class ContainerSandbox(object):
         # Collect the files that should be added to the docker build
         # context.
         files_to_add = {self.conf_path: None}
-        if self.conf_path.endswith('.xml'):
+        if self.application_configuration.is_java:
             files_to_add[self.get_web_xml(self.conf_path)] = None
 
         # The Dockerfile should add the config files to
@@ -465,40 +462,6 @@ class ContainerSandbox(object):
         """
         return os.path.join(os.path.dirname(full_config_file_path),
                             'web.xml')
-
-    @staticmethod
-    def verify_structure(full_config_file_path):
-        """Verify the correctness of the configuration files.
-
-        This includes making sure that the configuration file exists and
-        has a proper extension. If the config file is an xml file, there
-        needs to be a web.xml file in the same directory.
-
-        Args:
-            full_config_file_path: (basestring) The absolute path to a
-                .xml or .yaml config file.
-
-        Raises:
-            ValueError: If the config_file does not have a proper
-                extension (.yaml or .xml)
-            IOError: If the application is a Java app, and
-                the web.xml file cannot be found, or the config
-                file cannot be found.
-        """
-        if not os.path.exists(full_config_file_path):
-            raise IOError('The path %s could not be resolved.' %
-                          full_config_file_path)
-
-        filename = os.path.basename(full_config_file_path)
-        if not (filename.endswith('.xml') or filename.endswith('.yaml')):
-            raise ValueError('config_file is not a valid '
-                             'configuration file. Use either a .yaml '
-                             'file or .xml file.')
-
-        if filename.endswith('.xml'):
-            webxml = ContainerSandbox.get_web_xml(full_config_file_path)
-            if not os.path.exists(webxml):
-                raise IOError('Could not find web.xml at: %s' % webxml)
 
     @staticmethod
     def app_directory_from_config(full_config_file_path):
