@@ -6,6 +6,7 @@
 # pylint: disable=bad-indentation
 
 import httplib
+import signal
 import socket
 import StringIO
 import subprocess
@@ -15,6 +16,14 @@ import urlparse
 import docker
 
 import utils
+
+
+_EXITING = False
+
+
+def sig_handler(unused_signo, unused_frame):
+    global _EXITING
+    _EXITING = True
 
 
 class Container(object):
@@ -29,10 +38,29 @@ class Container(object):
             **docker_kwargs: (dict) Keyword arguments that can be supplied
                 to docker.Client.create_container.
         """
-        self.__dclient = dclient
-        res = self.__dclient.create_container(**docker_kwargs)
-        self.__container_id = res.get('Id')
-        self.host = urlparse.urlparse(self.__dclient.base_url).hostname
+        self.__container_id = None
+
+        # Anticipate the possibility of SIGINT during construction.
+        # Note that graceful behavior is guaranteed only for SIGINT.
+        try:
+            self.__dclient = dclient
+
+            # Set handler
+            prev = signal.signal(signal.SIGINT, sig_handler)
+            self.__container_id = (
+                self.__dclient.create_container(**docker_kwargs).get('Id'))
+
+            # Restore previous handler
+            signal.signal(signal.SIGINT, prev)
+
+            # If _EXITING is True, then the signal handler was called.
+            if _EXITING:
+                raise KeyboardInterrupt
+
+            self.host = urlparse.urlparse(self.__dclient.base_url).hostname
+        except KeyboardInterrupt:
+            self.remove()
+            raise
 
     def kill(self):
         """Kill the underlying container."""
@@ -133,4 +161,4 @@ class Container(object):
         fileobj = StringIO.StringIO(reply.read())
 
         # Wrap the TarFile for more user-friendliness
-        utils.TarWrapper(tarfile.open(fileobj=fileobj))
+        return utils.TarWrapper(tarfile.open(fileobj=fileobj))
