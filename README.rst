@@ -32,15 +32,11 @@ From its root directory, appstart can be installed like so: ::
 
 Requirements
 ===========================================================================
-It is required that the user have a working copy of gcloud with the app
-module.  To get the app module, run ``gcloud components update preview``.
-Gcloud will complain that there's no app module, and it will provide a
-prompt to install it. It is also required that the user have a docker
-client running, interfacing with the boot2docker vm. For instructions on
-installing these things see: ::
+It is required that the user have a Docker client running, interfacing
+with the boot2docker vm. Appstart is known to work for Docker api version
+1.19 (the latest version). For instructions on installing these things see: ::
 
-    - gcloud: https://cloud.google.com/sdk/
-    - docker: https://docs.docker.com/installation/ubuntulinux/
+    - docker: https://docs.docker.com/installation/
     - boot2docker: http://boot2docker.io/
 
 Usage
@@ -50,16 +46,17 @@ image like this: ::
 
     $ appstart init
 
-This command will take a while to complete (1-2 min).
+You can run `appstart --help` for a list of permissible command line
+options.
 
 Default invocation
 ---------------------------------------------------------------------------
 The appstart script can be use to start the application from the command
 line. It is invoked as follows: ::
 
-    $ appstart <PATH_TO_CONFIG_FILE>
+    $ appstart PATH_TO_CONFIG_FILE
 
-<PATH_TO_CONFIG_FILE> must be a path to the application’s configuration
+PATH_TO_CONFIG_FILE must be a path to the application’s configuration
 file, which is either 'appengine-web.xml' or a .yaml file. For Java
 standard runtime applications, the 'appengine-web.xml' file must be inside
 WEB-INF, along with a web.xml file. For all other applications, the .yaml
@@ -67,36 +64,52 @@ file must be in the root directory. By default, Appstart will attempt
 to locate the Dockerfile in the application's root directory and use it to
 build the application's image.
 
+Furthermore, Appstart will run an api server, simulating the Google Cloud
+Platform's services. It will invoke this api server using the
+application's configuration file.
+
 Specifying an image
 ---------------------------------------------------------------------------
 The --image_name flag can be used to specify an existing image rather than
 having Appstart build one from the Dockerfile. When --image_name is
 specified, a Dockerfile is not needed: ::
 
-    $ appstart <PATH_TO_CONFIG_FILE> --image_name=<IMAGE_NAME>
+    $ appstart PATH_TO_CONFIG_FILE --image_name=IMAGE_NAME
+
+Appstart can also start an image without a configuration file like so: ::
+
+    $ appstart --image_name=IMAGE_NAME
+
+In this case, appstart uses a "phony" app.yaml file as the application's
+configuration file.
 
 Turning off the api server
 ---------------------------------------------------------------------------
 By default, Appstart runs an api server so that the application can make
-calls to Google's services (datastore, taskqueue, logging, etc). If you
-don't consume these services, you can run appstart like this: ::
+calls to Google Cloud Platform services (datastore, taskqueue, logging,
+etc). If you don't consume these services, you can run appstart like
+this: ::
 
-    $ appstart <PATH_TO_CONFIG_FILE> --run_api_server=false
+    $ appstart PATH_TO_CONFIG_FILE --run_api_server=false
 
 Under the hood
 ===========================================================================
-Appstart will look in the target directory for the application’s
-Dockerfile. Upon finding one, it will build the application’s image with
-that Dockerfile. It will also build a layer on top of the devappserver
-image, populating the devappserver image with the contents of the
-application’s root directory. When devappserver starts, it will use the
-application’s configuration file to do so.  After building images for
-devappserver and the application, appstart will start containers based on
-these images, using the correct environment variables. The environment
-variables allow the application container to locate the devappserver
-container, and allow the devappserver container to locate the application
-container. The containers currently run on the same network stack for
-simplicity, but that’s subject to change in the future.
+Appstart runs the aforementioned api server in the devappserver container.
+The `appstart init` command builds the 'devappserver base image', which
+contains all the source files necessary for the api server to run.
+
+Appstart will also build a layer on top of the devappserver image,
+populating the devappserver image with the application’s configuration
+files. As was mentioned earlier, if Appstart is not provided with a
+configuration file, it adds a "phony" app.yaml file to the devappserver
+base image.
+
+After building images for devappserver and the application, appstart will
+start containers based on these images, using the correct environment
+variables. The environment variables allow the application container to
+locate the devappserver container, and allow the devappserver container to
+locate the application container. The containers currently run on the same
+network stack for simplicity, but that’s subject to change in the future.
 
 All of the functionality described above is implemented by the
 ContainerSandbox class. This class constructs a sandbox consisting of an

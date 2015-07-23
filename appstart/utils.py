@@ -95,7 +95,7 @@ def get_docker_client():
             assert_hostname=False)
 
     # pylint: disable=star-args
-    client = docker.Client(version='1.17',
+    client = docker.Client(version='1.19',
                            timeout=TIMEOUT_SECS,
                            **params)
     try:
