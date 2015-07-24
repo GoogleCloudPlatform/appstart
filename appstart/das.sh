@@ -5,6 +5,7 @@ python $(find $SDK_ROOT -name dev_appserver.py) \
     --api_host=0.0.0.0 \
     --api_port=$API_PORT \
     --admin_host=0.0.0.0 \
+    --admin_port=$ADMIN_PORT \
     --application=$APP_ID \
     --auth_domain=gmail.com \
     --clear_datastore=False \

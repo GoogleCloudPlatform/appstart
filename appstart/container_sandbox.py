@@ -80,7 +80,8 @@ class ContainerSandbox(object):
                  run_api_server=True,
                  storage_path='/tmp/app_engine/storage',
                  use_cache=True,
-                 timeout=MAX_ATTEMPTS):
+                 timeout=MAX_ATTEMPTS,
+                 force_version=False):
         """Get the sandbox ready to construct and run the containers.
 
         Args:
@@ -156,6 +157,8 @@ class ContainerSandbox(object):
                 images.
             timeout: (int) How many seconds to wait for the application
                 container to start.
+            force_version: (bool) Whether or not to continue in the case
+                of mismatched docker versions.
         """
         self.cur_time = time.strftime(TIME_FMT)
         self.app_id = (application_id or
@@ -187,6 +190,16 @@ class ContainerSandbox(object):
                                 'image_name must be specified.')
             self.conf_path = os.path.join(os.path.dirname(__file__),
                                           'app.yaml')
+        self.application_configuration = (
+            configuration.ApplicationConfiguration(self.conf_path))
+
+        # For Java apps, the xml file must be offset by WEB-INF.
+        # Otherwise, devappserver will think that it's a non-java app.
+        self.das_offset = (JAVA_OFFSET if
+                           self.application_configuration.is_java else '')
+
+        if not force_version:
+            utils.check_docker_version(self.dclient)
 
     def __enter__(self):
         self.start()
@@ -195,16 +208,7 @@ class ContainerSandbox(object):
     def start(self):
         """Start the sandbox."""
         try:
-            self.application_configuration = (
-                configuration.ApplicationConfiguration(self.conf_path))
-
-            # For Java apps, the xml file must be offset by WEB-INF.
-            # Otherwise, devappserver will think that it's a non-java app.
-            self.das_offset = (JAVA_OFFSET if
-                               self.application_configuration.is_java else '')
-
             self.create_and_run_containers()
-
         except:  # pylint: disable=bare-except
             self.stop()
             raise
@@ -226,6 +230,7 @@ class ContainerSandbox(object):
             das_env = {'APP_ID': self.app_id,
                        'PROXY_PORT': self.internal_proxy_port,
                        'API_PORT': self.internal_api_port,
+                       'ADMIN_PORT': self.internal_admin_port,
                        'CONFIG_FILE': os.path.join(
                            self.das_offset,
                            os.path.basename(self.conf_path))}
@@ -242,7 +247,7 @@ class ContainerSandbox(object):
             # proxy), and the admin panel.
             devappserver_hconf = docker.utils.create_host_config(
                 port_bindings={
-                    self.internal_proxy_port: self.port,
+                    DEFAULT_APPLICATION_PORT: self.port,
                     self.internal_admin_port: self.admin_port,
                 },
                 binds={
@@ -250,15 +255,15 @@ class ContainerSandbox(object):
                 }
             )
 
-            self.devappserver_container = container.Container(
-                self.dclient,
+            self.devappserver_container = container.DevappserverContainer(
+                self.dclient)
+            self.devappserver_container.create(
                 name=devappserver_container_name,
                 image=devappserver_image,
-                ports=[self.internal_proxy_port, self.internal_admin_port],
+                ports=[DEFAULT_APPLICATION_PORT, self.internal_admin_port],
                 volumes=['/storage'],
                 host_config=devappserver_hconf,
-                environment=das_env
-            )
+                environment=das_env)
 
             self.devappserver_container.start()
             get_logger().info('Starting container: %s',
@@ -299,7 +304,6 @@ class ContainerSandbox(object):
                             self.devappserver_container.get_id())
             ports = port_bindings = None
         else:
-            ports = [DEFAULT_APPLICATION_PORT]
             port_bindings = {DEFAULT_APPLICATION_PORT: self.port}
             network_mode = None
 
@@ -313,14 +317,14 @@ class ContainerSandbox(object):
 
         self.app_container = container.ApplicationContainer(
             self.application_configuration,
-            self.dclient,
+            self.dclient)
+        self.app_container.create(
             name=app_container_name,
             image=app_image,
             ports=ports,
             volumes=['/var/log/app_engine'],
             host_config=app_hconf,
-            environment=app_env,
-        )
+            environment=app_env)
 
         # Start as a shared network container, putting the application
         # on devappserver's network stack. (If devappserver is not
@@ -336,19 +340,12 @@ class ContainerSandbox(object):
         self.stop_and_remove_containers()
 
     def __exit__(self, etype, value, traceback):
-        """Stop and remove containers to clean up the environment.
-
-        Args:
-            etype: (type) The type of exception
-            value: (Exception) An instance of the exception raised
-            traceback: (traceback) An instance of the current traceback
-        """
         self.stop()
 
     def stop_and_remove_containers(self):
         """Stop and remove application containers."""
         for cont in [self.app_container, self.devappserver_container]:
-            if  cont:
+            if cont and cont.is_running():
                 cont_id = cont.get_id()
                 get_logger().info('Stopping %s', cont_id)
                 cont.kill()
@@ -363,35 +360,45 @@ class ContainerSandbox(object):
             utils.AppstartAbort: If the application server doesn't
                 start after timeout reach it on 8080.
         """
+        host = (self.devappserver_container.host if self.run_devappserver
+                else self.app_container.host)
+
+        get_logger().info('Waiting for application to listen on port 8080')
         attempt = 1
-        get_logger().info('Checking if server running')
         graphical = sys.stdout.isatty()
 
-        if graphical:
-            sys.stdout.write('Waiting for application ')
-            sys.stdout.flush()
-
-        while True:
-            if not self.devappserver_container.is_running():
-                self.devappserver_container.stream_logs(stream=False)
-                raise utils.AppstartAbort('Devappserver stopped prematurely')
+        def print_if_graphical(message):
             if graphical:
-                sys.stdout.write('.')
+                sys.stdout.write(message)
                 sys.stdout.flush()
-            if self.app_container.ping():
-                if graphical:
-                    sys.stdout.write('\n')
-                    sys.stdout.flush()
+
+        def exit_loop_with_error(error):
+            print_if_graphical('\n')
+            raise utils.AppstartAbort(error)
+
+        print_if_graphical('Waiting ')
+        while True:
+            if attempt > self.timeout:
+                exit_loop_with_error('The application server timed out.')
+
+            if not self.devappserver_container.is_running():
+                # There's been a problem with devappserver, so dump its logs
+                self.devappserver_container.stream_logs(stream=False)
+                exit_loop_with_error('Devappserver stopped prematurely')
+
+            if attempt % 4 == 0:
+                # \033[3D moves the cursor left 3 times. \033[K clears to the
+                # end of the line. So, every 4th ping, clear the dots.
+                print_if_graphical('\033[3D\033[K')
+            else:
+                print_if_graphical('.')
+
+            if self.devappserver_container.ping_application_container():
+                print_if_graphical('\n')
                 break
 
             attempt += 1
-            if attempt > self.timeout:
-                raise utils.AppstartAbort('The application server timed out.')
-
             time.sleep(1)
-
-        host = (self.devappserver_container.host if self.run_devappserver
-                else self.app_container.host)
 
         get_logger().info('Your application is live. '
                           'Access it at: {0}:{1}'.format(host, str(self.port)))

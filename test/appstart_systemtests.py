@@ -54,12 +54,6 @@ class SystemTests(unittest.TestCase):
         # Set up the containers
         cls.sandbox.start()
 
-    def test_copy(self):
-        internal_yaml = self.sandbox.app_container.read_file('/app/app.yaml')
-        yaml = open(self.conf_file, 'r').read()
-
-        self.assertEqual(internal_yaml, yaml)
-
     @classmethod
     def tearDownClass(cls):
         """Clean up the docker environment."""

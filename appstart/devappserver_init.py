@@ -25,15 +25,18 @@ import docker
 import appstart
 
 
-def base_image_from_dockerfile():
-    """Builds devappserver base image from source using a Dockerfile."""
+def base_image_from_dockerfile(use_cache=False):
+    """Builds devappserver base image from source using a Dockerfile.
+
+    Args:
+        use_cache: (bool) Whether or not to use Docker's cache in performing
+            the build.
+    """
     dclient = appstart.utils.get_docker_client()
 
-    # Since the devappserver base image should be built once, we should
-    # have no need to use the cache.
     res = dclient.build(path=os.path.dirname(__file__),
                         rm=True,
-                        nocache=True,
+                        nocache=not use_cache,
                         tag=DEVAPPSERVER_IMAGE)
 
     try:

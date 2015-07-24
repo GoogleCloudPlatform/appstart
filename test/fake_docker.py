@@ -64,6 +64,9 @@ class FakeDockerClient(object):
         self.removed_containers = []
         self.base_url = 'http://0.0.0.0:1234'
 
+    def version(self):
+        return {'Version': '1.5.0'}
+
     def ping(self):
         """Do nothing."""
         pass
@@ -96,7 +99,8 @@ class FakeDockerClient(object):
         # Create a new container and append it to the list of containers.
         new_container = {'Id': container_id,
                          'Running': False,
-                         'Options': kwargs}
+                         'Options': kwargs,
+                         'Name': kwargs['name']}
         self.containers.append(new_container)
         return {'Id': container_id, 'Warnings': None}
 

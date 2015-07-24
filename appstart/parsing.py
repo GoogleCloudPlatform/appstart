@@ -37,7 +37,16 @@ def make_appstart_parser():
     init_parser = subparsers.add_parser('init')
     init_parser.set_defaults(parser_type='init')
     add_appstart_args(run_parser)
+    add_init_args(init_parser)
     return parser
+
+
+def add_init_args(parser):
+    parser.add_argument('--use_cache',
+                        action='store_true',
+                        dest='use_cache',
+                        help='Flag to enable usage of cache during init.')
+    parser.set_defaults(use_cache=False)
 
 
 def add_appstart_args(parser):
@@ -119,6 +128,12 @@ def add_appstart_args(parser):
                         default=None,
                         help='The relative or absolute path to the '
                         "application\'s .yaml or .xml file.")
+    parser.add_argument('--force_version',
+                        action='store_true',
+                        dest='force_version',
+                        help='Force Appstart to run with mismatched docker '
+                        'version.')
+    parser.set_defaults(force_version=False)
 
 
 # pylint: disable=too-few-public-methods

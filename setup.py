@@ -31,7 +31,7 @@ with codecs.open(os.path.join(here, 'README.rst'), encoding='utf-8') as f:
 setup(
     name='appstart',
     version='0.8',
-    description='A utility to start Google App Engine managed VMs in containers.',
+    description='A utility to start GAE Managed VMs in containers.',
     long_description=long_description,
     url='https://github.com/GoogleCloudPlatform/appstart',
     author='Mitchell Gouzenko',

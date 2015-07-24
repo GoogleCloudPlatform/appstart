@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Wrapper around docker.Client to create semblance of container."""
+"""Wrapper around docker.Client to create semblance of a container."""
 
 # This file conforms to the external style guide.
-# pylint: disable=bad-indentation
+# pylint: disable=bad-indentation, g-bad-import-order
 
-import httplib
+import requests
 import signal
-import socket
 import StringIO
 import tarfile
 import threading
@@ -41,38 +40,52 @@ def sig_handler(unused_signo, unused_frame):
 class Container(object):
     """Wrapper around docker container."""
 
-    def __init__(self, dclient, **docker_kwargs):
+    def __init__(self, dclient):
         """Initializer for Container.
 
         Args:
             dclient: (docker.Client) The docker client that is managing
                 the container.
-            **docker_kwargs: (dict) Keyword arguments that can be supplied
-                to docker.Client.create_container.
         """
         self.__container_id = None
+        self.__dclient = dclient
+        res = urlparse.urlparse(self.__dclient.base_url)
+        self.host = (res.hostname if res.hostname != 'localunixsocket'
+                     else 'localhost')
 
+    def create(self, **docker_kwargs):
+        """Do the work of calling docker.Client.create_container.
+
+        The purpose of separating this functionality from __init__ is to be
+        safe from the race condition (as documented below).
+
+        Args:
+            **docker_kwargs: (dict) Keyword arguments that can be supplied
+                to docker.Client.create_container.
+
+        Raises:
+            KeyboardInterrupt: If SIGINT is caught during
+                docker.client.create_container.
+        """
         # Anticipate the possibility of SIGINT during construction.
         # Note that graceful behavior is guaranteed only for SIGINT.
-        try:
-            self.__dclient = dclient
+        prev = signal.signal(signal.SIGINT, sig_handler)
 
-            # Set handler
-            prev = signal.signal(signal.SIGINT, sig_handler)
-            self.__container_id = (
-                self.__dclient.create_container(**docker_kwargs).get('Id'))
+        # Protecting create_container in this manner ensures that there
+        # is GUARANTEED to be a container_id after this call. Then,
+        # if there was a KeyboardInterrupt, it'll bubble up to higher
+        # level error handling, which should remove the container.
+        # This solves the problem where create_container gets interrupted
+        # AFTER the container is created but BEFORE a result is returned.
+        self.__container_id = (
+            self.__dclient.create_container(**docker_kwargs).get('Id'))
 
-            # Restore previous handler
-            signal.signal(signal.SIGINT, prev)
+        # Restore previous handler
+        signal.signal(signal.SIGINT, prev)
 
-            # If _EXITING is True, then the signal handler was called.
-            if _EXITING:
-                raise KeyboardInterrupt
-
-            self.host = urlparse.urlparse(self.__dclient.base_url).hostname
-        except KeyboardInterrupt:
-            self.remove()
-            raise
+        # If _EXITING is True, then the signal handler was called.
+        if _EXITING:
+            raise KeyboardInterrupt
 
     def kill(self):
         """Kill the underlying container."""
@@ -98,7 +111,10 @@ class Container(object):
             **start_kwargs: (dict) Additional kwargs to be supplied to
                 docker.Client.start.
         """
-        self.__dclient.start(self.__container_id, **start_kwargs)
+        try:
+            self.__dclient.start(self.__container_id, **start_kwargs)
+        except docker.errors.APIError as err:
+            raise utils.AppstartAbort('Docker error: {0}'.format(err))
 
     def stream_logs(self, stream=True):
         """Print the container's stdout/stderr.
@@ -109,21 +125,45 @@ class Container(object):
                 collected from the container. If True, stdout/stderr collection
                 will continue as a subprocess.
         """
-        logs = self.__dclient.logs(container=self.__container_id, stream=stream)
 
-        def log_printer():
-            if stream:
-                for line in logs:
-                    utils.get_logger().info(line.strip())
-            else:
-                for line in logs.split('\n'):
-                    utils.get_logger().info(line)
+        def log_streamer():
+            # This loop tackles the problem of request timeouts. When the
+            # docker client is created, it establishes a timeout. The
+            # default is 60 seconds. If docker.Client.logs hangs for
+            # more than 60 seconds, this is considered a "timeout".
+            name = (self.__dclient.inspect_container(self.__container_id)
+                    .get('Name'))
+            while True:
+                try:
+                    # If a timeout happens, an error will be raise from inside
+                    # the log generator.
+                    logs = self.__dclient.logs(container=self.__container_id,
+                                               stream=True)
+                    for line in logs:
+                        utils.get_logger().info('{0}: {1}'.format(name,
+                                                                  line.strip()))
+
+                # In the case of a timeout, try to start collecting logs again.
+                except requests.exceptions.ReadTimeout:
+                    pass
+
+                # An APIError occurs if the container doesn't exist anymore.
+                # This indicates that we're shutting down, so we can break
+                # and terminate the thread.
+                except docker.errors.APIError:
+                    break
 
         if stream:
-            thread = threading.Thread(target=log_printer)
+            # If we want to stream the log output of the container,
+            # start another thread. There's no need to join this thread,
+            # because it's supposed to live until the container is removed.
+            thread = threading.Thread(target=log_streamer)
             thread.start()
         else:
-            log_printer()
+            logs = self.__dclient.logs(container=self.__container_id,
+                                       stream=False)
+            for line in logs.split('\n'):
+                            utils.get_logger().info(line.strip())
 
     def is_running(self):
         """Check if the container is still running.
@@ -131,38 +171,13 @@ class Container(object):
         Returns:
             (bool) Whether or not the container is running.
         """
-        res = self.__dclient.inspect_container(self.__container_id)
-        try:
-            return res['State']['Running']
-        except KeyError:
+        if not self.__container_id:
             return False
+        res = self.__dclient.inspect_container(self.__container_id)
+        return res['State']['Running']
 
     def get_id(self):
         return self.__container_id
-
-    def ping(self, port=8080):
-        """Check if container is listening on the specified port.
-
-        Args:
-            port: (int) The port to ping. This defaults to 8080 because
-                application containers are required (at a minimum) to have
-                a service listening on 8080.
-
-        Returns:
-            (bool) Whether or not the container is listening on the specified
-                port.
-        """
-
-        con = None
-        try:
-            con = httplib.HTTPConnection(self.host, port)
-            con.connect()
-            return True
-        except (socket.error, httplib.HTTPException):
-            return False
-        finally:
-            if con:
-                con.close()
 
     def execute(self, cmd, **create_kwargs):
         """Execute the command specified by cmd inside the container.
@@ -205,6 +220,17 @@ class Container(object):
 
         # Wrap the TarFile for more user-friendliness
         return utils.TarWrapper(tarfile.open(fileobj=fileobj))
+
+
+class DevappserverContainer(Container):
+    """Give devappserver the ability to ping the application.
+
+    Relies on devappserver having a pinger.py in the root directory.
+    """
+
+    def ping_application_container(self):
+        """Return True iff the application is listening on port 8080."""
+        return self.execute('python /pinger.py')['ExitCode'] == 0
 
 
 class ApplicationContainer(Container):

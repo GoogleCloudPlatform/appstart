@@ -6,7 +6,7 @@ These include appengine-web.xml files and *.yaml files.
 """
 
 # This file conforms to the external style guide.
-# pylint: disable=bad-indentation
+# pylint: disable=bad-indentation, g-bad-import-order
 
 import os
 import xml.dom.minidom

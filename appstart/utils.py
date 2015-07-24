@@ -37,8 +37,9 @@ TIMEOUT_SECS = 60
 # Default docker host if user isn't using boot2docker
 LINUX_DOCKER_HOST = '/var/run/docker.sock'
 
-# Docker client version (should be same as server version)
-DOCKER_VERSION = '1.17'
+# Supported docker versions
+DOCKER_API_VERSION = '1.17'
+DOCKER_SERVER_VERSION = '1.5.0'
 
 # Logger that is shared accross all components of appstart
 _logger = None
@@ -68,6 +69,28 @@ def get_logger():
         sh.setFormatter(formatter)
         _logger.addHandler(sh)
     return _logger
+
+
+def check_docker_version(dclient):
+    """Check version of docker server and log errors if it's too old/new.
+
+    The currently supported version of docker is 1.5.0.
+
+    Args:
+        dclient: (docker.Client) The docker client to use to connect to the
+            docker server.
+
+    Raises:
+        AppstartAbort: If user's docker server version is not correct.
+    """
+    version = dclient.version()
+    server_version = version.get('Version')
+    if server_version != '1.5.0':
+        raise AppstartAbort('Expected docker server version {0}. '
+                            'Found server version {1}. Use --force_version '
+                            'flag to run Appstart '
+                            'anyway'.format(DOCKER_SERVER_VERSION,
+                                            server_version))
 
 
 def get_docker_client():
@@ -118,7 +141,7 @@ def get_docker_client():
             assert_hostname=False)
 
     # pylint: disable=star-args
-    client = docker.Client(version=DOCKER_VERSION,
+    client = docker.Client(version=DOCKER_API_VERSION,
                            timeout=TIMEOUT_SECS,
                            **params)
     try:
@@ -257,7 +280,7 @@ def log_and_check_build_results(build_res, image_name):
                 with the build results (for logging purposes only)
 
         Raises:
-            docker.errors.DockerException: if the build failed.
+            AppstartAbort: if the build failed.
         """
         get_logger().info('  BUILDING IMAGE  '.center(80, '-'))
         get_logger().info('IMAGE  : %s', image_name)
@@ -285,4 +308,4 @@ def log_and_check_build_results(build_res, image_name):
         # Docker build doesn't raise exceptions, so raise one here if the
         # build was not successful.
         if not success:
-            raise docker.errors.DockerException('Image build failed.')
+            raise AppstartAbort('Image build failed.')
