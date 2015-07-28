@@ -37,6 +37,9 @@ TIMEOUT_SECS = 60
 # Default docker host if user isn't using boot2docker
 LINUX_DOCKER_HOST = '/var/run/docker.sock'
 
+# Docker client version (should be same as server version)
+DOCKER_VERSION = '1.17'
+
 # Logger that is shared accross all components of appstart
 _logger = None
 
@@ -107,7 +110,7 @@ def get_docker_client():
             assert_hostname=False)
 
     # pylint: disable=star-args
-    client = docker.Client(version='1.19',
+    client = docker.Client(version=DOCKER_VERSION,
                            timeout=TIMEOUT_SECS,
                            **params)
     try:

@@ -180,8 +180,6 @@ class ContainerSandbox(object):
 
         if config_file:
             self.conf_path = os.path.abspath(config_file)
-            self.application_configuration = (
-                configuration.ApplicationConfiguration(self.conf_path))
             self.app_dir = (self.app_directory_from_config(self.conf_path)
                             if not image_name else None)
         else:
@@ -189,6 +187,9 @@ class ContainerSandbox(object):
                                 'image_name must be specified.')
             self.conf_path = os.path.join(os.path.dirname(__file__),
                                           'app.yaml')
+
+        self.application_configuration = (
+            configuration.ApplicationConfiguration(self.conf_path))
 
         # For Java apps, the xml file must be offset by WEB-INF.
         # Otherwise, devappserver will think that it's a non-java app.

@@ -38,16 +38,21 @@ def main():
     standalone api server.
     """
     logging.getLogger('appstart').setLevel(logging.INFO)
-    if 'init' in sys.argv:
+    args = parsing.make_appstart_parser().parse_args()
+    if args.parser_type == 'init':
         devappserver_init.base_image_from_dockerfile()
-    else:
-        args = parsing.make_appstart_parser().parse_args()
+    elif args.parser_type == 'run':
+        sandbox_args = {key: getattr(args, key) for key in vars(args)
+                        if key != 'parser_type'}
         try:
-            with container_sandbox.ContainerSandbox(**vars(args)):
+            with container_sandbox.ContainerSandbox(**sandbox_args):
                 while True:
                     time.sleep(10000)
         except KeyboardInterrupt:
             logging.info('Appstart terminated by user.')
+    else:
+        logging.error('There was a problem while parsing arguments')
+        sys.exit(1)
 
 
 if __name__ == '__main__':

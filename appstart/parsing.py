@@ -31,6 +31,17 @@ def make_appstart_parser():
         description='Wrapper to run a managed vm container. If '
         'using for the first time, run \'appstart init\' '
         'to generate a devappserver base image.')
+    subparsers = parser.add_subparsers()
+    run_parser = subparsers.add_parser('run')
+    run_parser.set_defaults(parser_type='run')
+    init_parser = subparsers.add_parser('init')
+    init_parser.set_defaults(parser_type='init')
+    add_appstart_args(run_parser)
+    return parser
+
+
+def add_appstart_args(parser):
+    """Add Appstart's command line options to the parser."""
     parser.add_argument('--image_name',
                         default=None,
                         help='The name of the docker image to run. '
@@ -108,7 +119,6 @@ def make_appstart_parser():
                         default=None,
                         help='The relative or absolute path to the '
                         "application\'s .yaml or .xml file.")
-    return parser
 
 
 # pylint: disable=too-few-public-methods
