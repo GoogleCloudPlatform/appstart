@@ -71,7 +71,7 @@ class ContainerSandbox(object):
                  config_file=None,
                  image_name=None,
                  application_id=None,
-                 app_port=8080,
+                 application_port=8080,
                  admin_port=8000,
                  internal_admin_port=32768,
                  internal_api_port=32769,
@@ -119,7 +119,7 @@ class ContainerSandbox(object):
                 with the same application_id, (and of course, the same
                 storage_path) the datastore, blobstore, taskqueue, etc
                 will persist assuming their data has not been deleted.
-            app_port: (int) The port on the docker host that should be
+            application_port: (int) The port on the docker host that should be
                 mapped to the application. The application will be
                 accessible through this port.
             admin_port: (int) The port on the docker server host that
@@ -163,7 +163,7 @@ class ContainerSandbox(object):
         self.internal_api_port = internal_api_port
         self.internal_proxy_port = internal_proxy_port
         self.internal_admin_port = internal_admin_port
-        self.port = app_port
+        self.port = application_port
         self.storage_path = storage_path
         self.log_path = (
             log_path or self.make_timestamped_name(

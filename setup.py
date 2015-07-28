@@ -25,7 +25,6 @@ import os
 
 here = os.path.abspath(os.path.dirname(__file__))
 
-# Get the long description from the README file.
 with codecs.open(os.path.join(here, 'README.rst'), encoding='utf-8') as f:
     long_description = f.read()
 
@@ -38,8 +37,6 @@ setup(
     author='Mitchell Gouzenko',
     author_email='mgouzenko@gmail.com',
     license='APACHE',
-
-    # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',

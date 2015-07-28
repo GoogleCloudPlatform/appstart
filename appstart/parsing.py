@@ -45,7 +45,7 @@ def make_appstart_parser():
                         'You do not need one if you do not consume '
                         'standard Google services such as taskqueue, '
                         'datastore, logging, etc.')
-    parser.add_argument('--app_port',
+    parser.add_argument('--application_port',
                         default=8080,
                         type=int,
                         help='The port where the application should be '
