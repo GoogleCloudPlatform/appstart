@@ -20,6 +20,8 @@
 import os
 from appstart.container_sandbox import DEVAPPSERVER_IMAGE
 
+import docker
+
 import appstart
 
 
@@ -34,4 +36,7 @@ def base_image_from_dockerfile():
                         nocache=True,
                         tag=DEVAPPSERVER_IMAGE)
 
-    appstart.utils.log_and_check_build_results(res, DEVAPPSERVER_IMAGE)
+    try:
+        appstart.utils.log_and_check_build_results(res, DEVAPPSERVER_IMAGE)
+    except docker.errors.DockerException as err:
+        raise appstart.utils.AppstartAbort(err.message)

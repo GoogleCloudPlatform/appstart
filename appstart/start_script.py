@@ -28,6 +28,7 @@ import time
 from appstart import container_sandbox
 from appstart import devappserver_init
 from appstart import parsing
+import utils
 
 
 def main():
@@ -49,7 +50,11 @@ def main():
                 while True:
                     time.sleep(10000)
         except KeyboardInterrupt:
-            logging.info('Appstart terminated by user.')
+            utils.get_logger().info('Exiting')
+            sys.exit(0)
+        except utils.AppstartAbort as err:
+            utils.get_logger().warning(str(err.message))
+            sys.exit(1)
     else:
         logging.error('There was a problem while parsing arguments')
         sys.exit(1)

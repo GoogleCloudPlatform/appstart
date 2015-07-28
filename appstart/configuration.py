@@ -12,6 +12,8 @@ import os
 import xml.dom.minidom
 import yaml
 
+import utils
+
 
 class ApplicationConfiguration(object):
     """Class to parse an xml or yaml config file.
@@ -28,8 +30,8 @@ class ApplicationConfiguration(object):
                 file.
 
         Raises:
-            ValueError: If the config file neither ends with .yaml nor is
-                an appengine-web.xml file.
+            utils.AppstartAbort: If the config file neither ends with .yaml
+                nor is an appengine-web.xml file.
         """
         self.verify_structure(config_file)
         if config_file.endswith('.yaml'):
@@ -39,9 +41,9 @@ class ApplicationConfiguration(object):
             self.__init_from_xml_config(config_file)
             self.is_java = True
         else:
-            raise ValueError('config_file is not a valid '
-                             'configuration file. Use either a .yaml '
-                             'file or .xml file.')
+            raise utils.AppstartAbort('{0} is not a valid '
+                                      'configuration file. Use either a .yaml '
+                                      'file or .xml file.'.format(config_file))
 
     def __init_from_xml_config(self, xml_config):
         """Initialize from an xml file.
@@ -51,15 +53,17 @@ class ApplicationConfiguration(object):
                 file.
 
         Raises:
-            ValueError: If "<vm>true</vm>" is not set in the configuration.
+            utils.AppstartAbort: If "<vm>true</vm>" is not set in the
+                configuration.
         """
         root = xml.dom.minidom.parse(xml_config).firstChild
         try:
             vm = root.getElementsByTagName('vm')[0]
             assert vm.firstChild.nodeValue == 'true'
         except (IndexError, AttributeError, AssertionError):
-            raise ValueError('"<vm>true</vm>" must be set in '
-                             '{0}'.format(os.path.basename(xml_config)))
+            raise utils.AppstartAbort(
+                '"<vm>true</vm>" must be set in '
+                '{0}'.format(os.path.basename(xml_config)))
 
         # Assume that health checks are enabled.
         self.health_checks_enabled = True
@@ -79,12 +83,13 @@ class ApplicationConfiguration(object):
                 file.
 
         Raises:
-            ValueError: if "vm: true" is not set in the configuration.
+            utils.AppstartAbort: if "vm: true" is not set in the configuration.
         """
         yaml_dict = yaml.load(open(yaml_config))
         if not yaml_dict.get('vm'):
-            raise ValueError('"vm: true" must be set in '
-                             '{0}'.format(os.path.basename(yaml_config)))
+            raise utils.AppstartAbort(
+                '"vm: true" must be set in '
+                '{0}'.format(os.path.basename(yaml_config)))
         hc_options = yaml_dict.get('health_check')
         if hc_options and not hc_options.get('enable_health_check', True):
             self.health_checks_enabled = False
@@ -103,16 +108,17 @@ class ApplicationConfiguration(object):
                 .xml or .yaml config file.
 
         Raises:
-            IOError: If the application is a Java app, and
+            utils.AppstartAbort: If the application is a Java app, and
                 the web.xml file cannot be found, or the config
                 file cannot be found.
         """
         if not os.path.exists(full_config_file_path):
-            raise IOError('The path %s could not be resolved.' %
-                          full_config_file_path)
+            raise utils.AppstartAbort('The path %s could not be resolved.' %
+                                      full_config_file_path)
 
         if full_config_file_path.endswith('.xml'):
             webxml = os.path.join(os.path.dirname(full_config_file_path),
                                   'web.xml')
             if not os.path.exists(webxml):
-                raise IOError('Could not find web.xml at: %s' % webxml)
+                raise utils.AppstartAbort('Could not find web.xml at: '
+                                          '{}'.format(webxml))

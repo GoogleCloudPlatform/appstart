@@ -21,8 +21,8 @@ import httplib
 import signal
 import socket
 import StringIO
-import subprocess
 import tarfile
+import threading
 import urlparse
 
 import docker
@@ -100,13 +100,42 @@ class Container(object):
         """
         self.__dclient.start(self.__container_id, **start_kwargs)
 
-    def stream_logs(self):
-        """Print the container's stdout/stderr if necessary."""
+    def stream_logs(self, stream=True):
+        """Print the container's stdout/stderr.
 
-        # docker.Client.logs seems to be broken, so use CLI instead :(
-        # TODO(gouzenko): Fix capture of stdout, stderr
-        subprocess.Popen('docker logs -f {0}'.format(self.__container_id),
-                         shell=True)
+        Args:
+            stream: (bool) Whether or not to continue streaming stdout/stderr.
+                If False, only the current stdout/stderr buffer will be
+                collected from the container. If True, stdout/stderr collection
+                will continue as a subprocess.
+        """
+        logs = self.__dclient.logs(container=self.__container_id, stream=stream)
+
+        def log_printer():
+            if stream:
+                for line in logs:
+                    utils.get_logger().info(line.strip())
+            else:
+                for line in logs.split('\n'):
+                    utils.get_logger().info(line)
+
+        if stream:
+            thread = threading.Thread(target=log_printer)
+            thread.start()
+        else:
+            log_printer()
+
+    def is_running(self):
+        """Check if the container is still running.
+
+        Returns:
+            (bool) Whether or not the container is running.
+        """
+        res = self.__dclient.inspect_container(self.__container_id)
+        try:
+            return res['State']['Running']
+        except KeyError:
+            return False
 
     def get_id(self):
         return self.__container_id
@@ -160,7 +189,8 @@ class Container(object):
                 to the file/directory to extract.
 
         Raises:
-            IOError: If path cannot be resolved within the container.
+            utils.AppstartAbort: If path cannot be resolved within the
+                container.
 
         Returns:
             (utils.TarWrapper) The tar archive.
@@ -168,7 +198,8 @@ class Container(object):
         try:
             reply = self.__dclient.copy(self.__container_id, path)
         except docker.errors.APIError:
-            raise IOError('File could not be found at {0}.'.format(path))
+            raise utils.AppstartAbort('File could not be '
+                                      'found at {0}.'.format(path))
 
         fileobj = StringIO.StringIO(reply.read())
 

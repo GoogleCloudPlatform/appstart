@@ -48,6 +48,10 @@ FMT = '[%(levelname).1s: %(asctime)s] %(message)s'
 DATE_FMT = '%H:%M:%S'
 
 
+class AppstartAbort(Exception):
+    pass
+
+
 def get_logger():
     """Configures the appstart logger if it doesn't exist yet.
 
@@ -68,6 +72,10 @@ def get_logger():
 
 def get_docker_client():
     """Get the user's docker client.
+
+    Raises:
+        AppstartAbort: If there was an error in connecting to the
+            Docker Daemon.
 
     Returns:
         (docker.Client) a docker client that can be used to manage
@@ -116,9 +124,8 @@ def get_docker_client():
     try:
         client.ping()
     except requests.exceptions.ConnectionError as excep:
-        get_logger().error('Failed to connect to Docker '
-                           'Daemon due to: %s', excep)
-        raise
+        raise AppstartAbort('Failed to connect to Docker '
+                            'Daemon due to: {0}'.format(excep.message))
     return client
 
 

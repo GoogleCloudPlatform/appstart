@@ -188,14 +188,6 @@ class ContainerSandbox(object):
             self.conf_path = os.path.join(os.path.dirname(__file__),
                                           'app.yaml')
 
-        self.application_configuration = (
-            configuration.ApplicationConfiguration(self.conf_path))
-
-        # For Java apps, the xml file must be offset by WEB-INF.
-        # Otherwise, devappserver will think that it's a non-java app.
-        self.das_offset = (JAVA_OFFSET if self.application_configuration.is_java
-                           else '')
-
     def __enter__(self):
         self.start()
         return self
@@ -203,18 +195,18 @@ class ContainerSandbox(object):
     def start(self):
         """Start the sandbox."""
         try:
+            self.application_configuration = (
+                configuration.ApplicationConfiguration(self.conf_path))
+
+            # For Java apps, the xml file must be offset by WEB-INF.
+            # Otherwise, devappserver will think that it's a non-java app.
+            self.das_offset = (JAVA_OFFSET if
+                               self.application_configuration.is_java else '')
+
             self.create_and_run_containers()
-        except KeyboardInterrupt:  # pylint: disable=bare-except
+
+        except:  # pylint: disable=bare-except
             self.stop()
-            get_logger().warning('Caught SIGINT when the sandbox '
-                                 'was being set up. The environment was '
-                                 'successfully cleaned up.')
-            sys.exit(0)
-        except:
-            self.stop()
-            get_logger().warning('An error was detected when the sandbox '
-                                 'was being set up. The environment was '
-                                 'successfully cleaned up.')
             raise
 
     def create_and_run_containers(self):
@@ -350,10 +342,6 @@ class ContainerSandbox(object):
             etype: (type) The type of exception
             value: (Exception) An instance of the exception raised
             traceback: (traceback) An instance of the current traceback
-
-        Returns:
-            True if the sandbox was exited normally (ie exiting the with
-            block or KeyboardInterrupt).
         """
         self.stop()
 
@@ -372,7 +360,7 @@ class ContainerSandbox(object):
         """Wait for the app container to start.
 
         Raises:
-            RuntimeError: If the application server doesn't
+            utils.AppstartAbort: If the application server doesn't
                 start after timeout reach it on 8080.
         """
         attempt = 1
@@ -384,6 +372,9 @@ class ContainerSandbox(object):
             sys.stdout.flush()
 
         while True:
+            if not self.devappserver_container.is_running():
+                self.devappserver_container.stream_logs(stream=False)
+                raise utils.AppstartAbort('Devappserver stopped prematurely')
             if graphical:
                 sys.stdout.write('.')
                 sys.stdout.flush()
@@ -395,7 +386,7 @@ class ContainerSandbox(object):
 
             attempt += 1
             if attempt > self.timeout:
-                raise RuntimeError('The application server timed out.')
+                raise utils.AppstartAbort('The application server timed out.')
 
             time.sleep(1)
 
