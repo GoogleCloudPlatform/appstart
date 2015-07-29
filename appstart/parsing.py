@@ -111,21 +111,6 @@ def make_appstart_parser():
     return parser
 
 
-def make_init_parser():
-    """Make an argument parser for the init subcommand.
-
-    Returns:
-        (argparse.ArgumentParser) a parser for the init subcommand.
-    """
-    parser = argparse.ArgumentParser(
-        description='Build the base devappserver image.')
-    parser.add_argument('--source',
-                        default=None,
-                        help='Specify the root directory of the gcloud '
-                        'sdk source.')
-    return parser
-
-
 # pylint: disable=too-few-public-methods
 class BoolAction(argparse.Action):
     """Action to parse boolean values."""

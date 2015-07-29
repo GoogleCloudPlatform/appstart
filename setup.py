@@ -55,7 +55,7 @@ setup(
     ],
     keywords='GAE Google App Engine appengine development docker',
     packages=find_packages(),
-    package_data={'appstart': ['Dockerfile', 'app.yaml']},
+    package_data={'appstart': ['Dockerfile', 'app.yaml', 'das.sh']},
     install_requires=['docker-py'],
     entry_points={
         'console_scripts': [
