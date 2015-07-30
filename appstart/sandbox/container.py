@@ -212,8 +212,7 @@ class Container(object):
                 to the file/directory to extract.
 
         Raises:
-            utils.AppstartAbort: If path cannot be resolved within the
-                container.
+            IOError: If path cannot be resolved within the container.
 
         Returns:
             (utils.TarWrapper) The tar archive.
@@ -221,8 +220,7 @@ class Container(object):
         try:
             reply = self._dclient.copy(self._container_id, path)
         except docker.errors.APIError:
-            raise utils.AppstartAbort('File could not be '
-                                      'found at {0}.'.format(path))
+            raise IOError('File could not be found at {0}.'.format(path))
 
         fileobj = StringIO.StringIO(reply.read())
 

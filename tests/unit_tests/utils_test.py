@@ -125,10 +125,10 @@ class TarTest(unittest.TestCase):
         temp.seek(0)
 
         wrapped_tar = utils.TarWrapper(tarfile.open(mode='r', fileobj=temp))
-        self.assertEqual(wrapped_tar.read_file('root/bar.txt'), 'bar')
-        self.assertEqual(wrapped_tar.read_file('root/baz/foo.txt'), 'foo')
+        self.assertEqual(wrapped_tar.get_file('root/bar.txt').read(), 'bar')
+        self.assertEqual(wrapped_tar.get_file('root/baz/foo.txt').read(), 'foo')
         with self.assertRaises(ValueError):
-            wrapped_tar.read_file('root')
+            wrapped_tar.get_file('root')
 
         files, dirs = wrapped_tar.list('root')
         self.assertEqual(files, ['bar.txt'])

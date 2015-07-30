@@ -1,4 +1,16 @@
 # Copyright 2015 Google Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """This file contains the classes that form a framework for validation.
 
@@ -38,9 +50,9 @@ import color_logging
 FATAL = 30
 WARNING = 20
 UNUSED = 10
-_LEVEL_NAMES = {FATAL: 'FATAL',
-                WARNING: 'WARNING',
-                UNUSED: 'UNUSED'}
+LEVEL_NAMES = {FATAL: 'FATAL',
+               WARNING: 'WARNING',
+               UNUSED: 'UNUSED'}
 
 # Lifecycle timeline
 POST_STOP = 50
@@ -84,7 +96,7 @@ class ContractTestResult(unittest.TextTestResult):
         Args:
             success_set: (set) A set of test classes that have succeeded thus
                 far. Upon success, the class should be added to this set.
-            threshold: (int) One of the error levels in _LEVEL_NAMES.keys().
+            threshold: (int) One of the error levels in LEVEL_NAMES.keys().
                 Validation will result in failure if and only if a
                 test with an error_level greater than threshold fails.
             *test_result_args: (list) Arguments to be passed to the
@@ -215,11 +227,11 @@ class ContractTestResult(unittest.TextTestResult):
             prefix = '[{0: >6}]'.format(outcome_type)
         else:
             prefix = '[{0} ({1})]'.format(outcome_type,
-                                          _LEVEL_NAMES.get(test.error_level))
+                                          LEVEL_NAMES.get(test.error_level))
 
         if color:
-            prefix = '{%s}%s{end}' % (color, prefix)
-        return '%s %s' % (prefix, test.shortDescription())
+            prefix = '%({0})s{1}%(end)s'.format(color, prefix)
+        return '{0} {1}'.format(prefix, test.shortDescription())
 
     def print_errors(self):
         """Write failures and errors to the stream after tests."""
@@ -227,7 +239,7 @@ class ContractTestResult(unittest.TextTestResult):
             return
 
         self.stream.writeln(
-            ' {bold}Failure Details{end} '.center(100, '-'),
+            ' %(bold)s Failure Details %(end)s '.center(100, '-'),
             lvl=logging.DEBUG if self.success else logging.INFO)
 
         for test, _ in self.failures:
@@ -250,14 +262,13 @@ class ContractTestResult(unittest.TextTestResult):
             self.stream.writeln(err)
 
     def print_skips(self):
-        self.stream.writeln(' {bold}Skip Details{end} '.center(100, '-'),
+        self.stream.writeln(' %(bold)s Skip Details %(end)s '.center(100, '-'),
                             lvl=logging.DEBUG)
         for test, reason in self.skipped:
             message = self.__make_message(test, self.SKIP, short=False)
             self.stream.writeln(message, lvl=logging.DEBUG)
-            self.stream.writeln('Reason: {reason}',
-                                lvl=logging.DEBUG,
-                                reason=reason)
+            self.stream.writeln('Reason: {0}'.format(reason),
+                                lvl=logging.DEBUG)
 
             self.stream.writeln(lvl=logging.DEBUG)
 
@@ -276,7 +287,7 @@ class ContractTestRunner(unittest.TextTestRunner):
             success_set: (set) An empty set. Test classes that have succeeded
                 should be added to this set.
             threshold: (int) One of the error levels as specified above
-                in the _LEVEL_NAMES global var. Validation will result in
+                in the LEVEL_NAMES global var. Validation will result in
                 failure if and only if a test with an error_level greater
                 than threshold fails.
             logfile: (basestring) The logfile to append messages to.
@@ -314,7 +325,7 @@ class ContractTestRunner(unittest.TextTestRunner):
             (ContractTestResult) The result of the tests.
         """
         self.stream.writeln()
-        self.stream.writeln('{bold}Running tests: {point}{end}', point=point)
+        self.stream.writeln('%(bold)s Running tests: {0} %(end)s'.format(point))
         result = self._makeResult()
         unittest.signals.registerResult(result)
         result.failfast = self.failfast
@@ -347,7 +358,7 @@ class ContractTestRunner(unittest.TextTestRunner):
             infos.append('PASSED=%d' % len(result.success_list))
         for level in result.error_stats.keys():
             infos.append('%s=%i' %
-                         (_LEVEL_NAMES[level], result.error_stats[level]))
+                         (LEVEL_NAMES[level], result.error_stats[level]))
         if result.skipped:
             infos.append('SKIPPED=%d' % len(result.skipped))
 
@@ -369,7 +380,7 @@ class ContractClause(unittest.TestCase):
     #     in _TIMELINE. This determines in which time period the clause
     #     will be evaluated.
     # error_level: (int) A number corresponding to an
-    #     error level in _LEVEL_NAMES. This indicates the severity of
+    #     error level in LEVEL_NAMES. This indicates the severity of
     #     the error that would occur in production, should the container
     #     not fulfill the clause. Clauses that assert conditions
     #     that are essential to the operation of a container should
@@ -409,7 +420,7 @@ class ContractClause(unittest.TestCase):
                            'point.'.format(self.__class__.__name__))
 
         # Ensure a valid error_level
-        if self.error_level not in _LEVEL_NAMES.keys():
+        if self.error_level not in LEVEL_NAMES.keys():
             raise KeyError('{0} does not have a valid error '
                            'level.'.format(self.__class__.__name__))
 
@@ -588,7 +599,7 @@ class ContractValidator(object):
 
         Args:
             threshold: (int) One of the error levels as specified above
-                in the _LEVEL_NAMES global var. Validation will result in
+                in the LEVEL_NAMES global var. Validation will result in
                 failure if and only if a test with an error_level greater
                 than threshold fails.
             logfile: (basestring or None) The name of the log file to append

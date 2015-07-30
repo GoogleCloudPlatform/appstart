@@ -1,4 +1,16 @@
 # Copyright 2015 Google Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Color logging for the validator."""
 
@@ -7,7 +19,6 @@
 # pylint: disable=bad-indentation, g-bad-import-order
 
 import logging
-import string
 
 import color_formatting
 
@@ -18,16 +29,6 @@ class LogfileHandler(logging.FileHandler):
         # Only emit the record if it wasn't an empty string or separator.
         if str(record.msg).replace('=', ''):
             super(LogfileHandler, self).emit(record)
-
-
-class StringFormatDict(dict):
-    """Wrapper around dict.
-
-    Instead of raising KeyError, this returns missing keys surrounded in "{}".
-    """
-
-    def __missing__(self, key):
-        return '{{{key}}}'.format(key=key)
 
 
 class LoggingStream(object):
@@ -51,36 +52,24 @@ class LoggingStream(object):
         self.__logger.addHandler(stream_handler)
 
         if logfile:
-            # Logfile handler doesn't emit empty records.
+            # This special logfile handler doesn't emit empty records.
             logfile_handler = LogfileHandler(logfile)
             logfile_handler.setLevel(logging.DEBUG)
 
-            # Eliminate colors if writing to a log file.
+            # Use a colorless formatter since this handler logs to a file.
             logfile_handler.setFormatter(
                 fmt=color_formatting.ColorFormatter(tty=False))
             self.__logger.addHandler(logfile_handler)
 
-    def writeln(self, message=None, lvl=logging.INFO, **fmt_kwargs):
+    def writeln(self, message=None, lvl=logging.INFO):
         """Write logs, but do proper formatting first.
 
         Args:
             message: (basestring) A message that may or may not contain.
                 unformatted replacement fields.
             lvl: (int) The logging level.
-            **fmt_kwargs: (dict) Args used to partially format the message
-                by filling in some of the replacement fields.
         """
         if message is None:
             message = ''
 
-        formatter = string.Formatter()
-
-        # The message might have color formatting that we're not ready to
-        # replace just yet. This customized dict leaves replacement fields
-        # untouched if there is no argument to perform a replacement.
-        name_mapping = StringFormatDict(fmt_kwargs)
-        formatted_message = formatter.vformat(message, (), name_mapping)
-
-        # The formatter attached to the log handlers will finish formatting
-        # by filling the color replacement fields.
-        self.__logger.log(lvl, msg=formatted_message)
+        self.__logger.log(lvl, msg=message)
