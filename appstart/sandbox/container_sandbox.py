@@ -33,11 +33,15 @@ import docker
 
 import configuration
 import container
-import utils
-from utils import get_logger
+from .. import utils
+from ..utils import get_logger
 
-# Devappserver base image
+
+# Devappserver base image name
 DEVAPPSERVER_IMAGE = 'appstart_devappserver_base'
+
+# Pinger image name
+PINGER = 'appstart_pinger'
 
 # Maximum attempts to health check application container.
 MAX_ATTEMPTS = 30
@@ -79,7 +83,7 @@ class ContainerSandbox(object):
                  log_path=None,
                  run_api_server=True,
                  storage_path='/tmp/app_engine/storage',
-                 use_cache=True,
+                 nocache=False,
                  timeout=MAX_ATTEMPTS,
                  force_version=False):
         """Get the sandbox ready to construct and run the containers.
@@ -153,7 +157,7 @@ class ContainerSandbox(object):
                 collect. Note that this path defaults to
                 /tmp/appengine/storage, so it should be changed if the data
                 is intended to persist.
-            use_cache: (bool) Whether or not to use the cache when building
+            nocache: (bool) Whether or not to use the cache when building
                 images.
             timeout: (int) How many seconds to wait for the application
                 container to start.
@@ -177,7 +181,8 @@ class ContainerSandbox(object):
         self.dclient = utils.get_docker_client()
         self.devappserver_container = None
         self.app_container = None
-        self.nocache = not use_cache
+        self.pinger_container = None
+        self.nocache = nocache
         self.run_devappserver = run_api_server
         self.timeout = timeout
 
@@ -186,8 +191,9 @@ class ContainerSandbox(object):
             self.app_dir = (self.app_directory_from_config(self.conf_path)
                             if not image_name else None)
         else:
-            assert image_name, ('At least one of config_file and '
-                                'image_name must be specified.')
+            if not image_name:
+                raise utils.AppstartAbort('At least one of config_file and '
+                                          'image_name must be specified.')
             self.conf_path = os.path.join(os.path.dirname(__file__),
                                           'app.yaml')
         self.application_configuration = (
@@ -255,8 +261,7 @@ class ContainerSandbox(object):
                 }
             )
 
-            self.devappserver_container = container.DevappserverContainer(
-                self.dclient)
+            self.devappserver_container = container.Container(self.dclient)
             self.devappserver_container.create(
                 name=devappserver_container_name,
                 image=devappserver_image,
@@ -305,6 +310,7 @@ class ContainerSandbox(object):
             ports = port_bindings = None
         else:
             port_bindings = {DEFAULT_APPLICATION_PORT: self.port}
+            ports = [DEFAULT_APPLICATION_PORT]
             network_mode = None
 
         app_hconf = docker.utils.create_host_config(
@@ -330,8 +336,19 @@ class ContainerSandbox(object):
         # on devappserver's network stack. (If devappserver is not
         # running, network_mode is None).
         self.app_container.start(network_mode=network_mode)
-
         get_logger().info('Starting container: %s', app_container_name)
+
+        # Construct a pinger container and bind it to the application's network
+        # stack. This will allow the pinger to attempt to connect to the
+        # application's ports.
+        pinger_name = self.make_timestamped_name('pinger', self.cur_time)
+        self.pinger_container = container.PingerContainer(self.dclient)
+        self.pinger_container.create(name=pinger_name, image=PINGER)
+        get_logger().info('Starting container: {0}'.format(pinger_name))
+
+        self.pinger_container.start(
+            network_mode='container:{0}'.format(self.app_container.get_id()))
+
         self.wait_for_start()
         self.app_container.stream_logs()
 
@@ -344,8 +361,11 @@ class ContainerSandbox(object):
 
     def stop_and_remove_containers(self):
         """Stop and remove application containers."""
-        for cont in [self.app_container, self.devappserver_container]:
-            if cont and cont.is_running():
+        containers_to_remove = [self.app_container,
+                                self.devappserver_container,
+                                self.pinger_container]
+        for cont in containers_to_remove:
+            if cont and cont.running():
                 cont_id = cont.get_id()
                 get_logger().info('Stopping %s', cont_id)
                 cont.kill()
@@ -360,8 +380,7 @@ class ContainerSandbox(object):
             utils.AppstartAbort: If the application server doesn't
                 start after timeout reach it on 8080.
         """
-        host = (self.devappserver_container.host if self.run_devappserver
-                else self.app_container.host)
+        host = self.pinger_container.host
 
         get_logger().info('Waiting for application to listen on port 8080')
         attempt = 1
@@ -381,7 +400,8 @@ class ContainerSandbox(object):
             if attempt > self.timeout:
                 exit_loop_with_error('The application server timed out.')
 
-            if not self.devappserver_container.is_running():
+            if (self.run_devappserver and
+                not self.devappserver_container.running()):
                 # There's been a problem with devappserver, so dump its logs
                 self.devappserver_container.stream_logs(stream=False)
                 exit_loop_with_error('Devappserver stopped prematurely')
@@ -393,7 +413,7 @@ class ContainerSandbox(object):
             else:
                 print_if_graphical('.')
 
-            if self.devappserver_container.ping_application_container():
+            if self.pinger_container.ping_application_container():
                 print_if_graphical('\n')
                 break
 
@@ -410,12 +430,7 @@ class ContainerSandbox(object):
             (basestring) The name of the new app image.
         """
         name = self.make_timestamped_name('app_image', self.cur_time)
-        res = self.dclient.build(path=self.app_dir,
-                                 rm=True,
-                                 nocache=self.nocache,
-                                 quiet=False,
-                                 tag=name)
-        utils.log_and_check_build_results(res, name)
+        utils.build_from_directory(self.app_dir, name)
         return name
 
     def build_devappserver_image(self):

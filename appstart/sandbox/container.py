@@ -26,7 +26,7 @@ import urlparse
 
 import docker
 
-import utils
+from .. import utils
 
 
 _EXITING = False
@@ -165,7 +165,7 @@ class Container(object):
             for line in logs.split('\n'):
                             utils.get_logger().info(line.strip())
 
-    def is_running(self):
+    def running(self):
         """Check if the container is still running.
 
         Returns:
@@ -222,10 +222,10 @@ class Container(object):
         return utils.TarWrapper(tarfile.open(fileobj=fileobj))
 
 
-class DevappserverContainer(Container):
+class PingerContainer(Container):
     """Give devappserver the ability to ping the application.
 
-    Relies on devappserver having a pinger.py in the root directory.
+    Relies on container having a pinger.py in the root directory.
     """
 
     def ping_application_container(self):

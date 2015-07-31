@@ -21,6 +21,24 @@ This class is used for unit testing ContainerSandbox.
 
 import uuid
 
+import docker
+
+from appstart.sandbox import container_sandbox
+
+
+DEFAULT_IMAGES = [container_sandbox.DEVAPPSERVER_IMAGE,
+                  container_sandbox.PINGER]
+images = list(DEFAULT_IMAGES)
+containers = []
+removed_containers = []
+
+
+def reset():
+    global containers, images, removed_containers
+    containers = []
+    images = list(DEFAULT_IMAGES)
+    removed_containers = []
+
 
 # Fake build results, mimicking those that appear from docker.Client.build
 BUILD_RES = [
@@ -59,10 +77,8 @@ class FakeDockerClient(object):
 
     def __init__(self, **kwargs):  # pylint: disable=unused-argument
         """Keep lists for images, containers, and removed containers."""
-        self.images = []
-        self.containers = []
-        self.removed_containers = []
         self.base_url = 'http://0.0.0.0:1234'
+        self.kwargs = kwargs
 
     def version(self):
         return {'Version': '1.5.0'}
@@ -81,8 +97,14 @@ class FakeDockerClient(object):
             raise KeyError('appstart must specify nocache in builds.')
 
         # "Store" the newly "built" image
-        self.images.append(kwargs['tag'])
+        images.append(kwargs['tag'])
         return BUILD_RES
+
+    def inspect_container(self, container_id):
+        cont = self.__find_container(container_id)
+        return {'Name': cont['Name'],
+                'Id': cont['Id'],
+                'State': {'Running': cont['Running']}}
 
     def create_container(self, **kwargs):
         """Imitiate docker.Client.create_container."""
@@ -90,7 +112,7 @@ class FakeDockerClient(object):
             raise KeyError('image was not specified.')
         if 'name' not in kwargs:
             raise KeyError('appstart should not make unnamed containers.')
-        if kwargs['image'] not in self.images:
+        if kwargs['image'] not in images:
             raise RuntimeError('the specified image does not exist.')
 
         # Create a unique id for the container.
@@ -101,7 +123,7 @@ class FakeDockerClient(object):
                          'Running': False,
                          'Options': kwargs,
                          'Name': kwargs['name']}
-        self.containers.append(new_container)
+        containers.append(new_container)
         return {'Id': container_id, 'Warnings': None}
 
     def kill(self, cont_id):
@@ -114,8 +136,8 @@ class FakeDockerClient(object):
         cont_to_rm = self.__find_container(cont_id)
         if cont_to_rm['Running']:
             raise RuntimeError('tried to remove a running container.')
-        self.removed_containers.append(cont_to_rm)
-        self.containers.remove(cont_to_rm)
+        removed_containers.append(cont_to_rm)
+        containers.remove(cont_to_rm)
 
     def start(self, cont_id, **kwargs):  # pylint: disable=unused-argument
         """Imitate docker.Client.start."""
@@ -124,7 +146,7 @@ class FakeDockerClient(object):
 
     def __find_container(self, cont_id):
         """Helper function to find a container based on id."""
-        for cont in self.containers:
+        for cont in containers:
             if cont['Id'] == cont_id:
                 return cont
-        raise ValueError('container was not found.')
+        raise docker.errors.APIError('container was not found.')

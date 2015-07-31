@@ -12,4 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilities for starting and manipulating GAE Managed VM containers."""
+# This is the Dockerfile for building a pinger. The pinger checks if the
+# application is listening on port 8080 by connecting to its network stack.
+FROM debian
+RUN apt-get update && apt-get install -y python
+ADD ./pinger.py /
+ENTRYPOINT while true; do sleep 1000; done;

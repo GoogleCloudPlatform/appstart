@@ -51,12 +51,14 @@ setup(
         'Programming Language :: Python :: 3.4',
     ],
     keywords='GAE Google App Engine appengine development docker',
-    packages=find_packages(),
-    package_data={'appstart': ['Dockerfile', 'app.yaml', 'das.sh']},
+    packages=find_packages(exclude='test'),
+    package_data={'appstart.devappserver_init': ['Dockerfile', 'das.sh'],
+                  'appstart.pinger': ['Dockerfile'],
+                  'appstart.sandbox': ['app.yaml']},
     install_requires=['docker-py'],
     entry_points={
         'console_scripts': [
-            'appstart=appstart.start_script:main',
+            'appstart=appstart.cli.start_script:main',
         ],
     },
 )

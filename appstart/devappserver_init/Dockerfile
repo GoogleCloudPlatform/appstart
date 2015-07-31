@@ -11,5 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""Utilities for starting and manipulating GAE Managed VM containers."""
+#
+# This is the Dockerfile for building a devappserver base image.
+FROM debian
+RUN apt-get update
+RUN apt-get install -y python curl python-pip
+RUN curl https://dl.google.com/dl/cloudsdk/release/install_google_cloud_sdk.bash > install.sh
+RUN bash ./install.sh --disable-prompts --install-dir ./sdk
+RUN SDK_ROOT=$(echo /sdk/$(ls sdk/)); $(echo $SDK_ROOT/bin/gcloud components update preview app app-engine-python)
+ADD ./das.sh /
+ENTRYPOINT /das.sh

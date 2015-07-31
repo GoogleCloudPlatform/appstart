@@ -12,4 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilities for starting and manipulating GAE Managed VM containers."""
+"""Package that contains the files necessary to build the pinger.
+
+The pinger is intended to ping the application container to check if it's
+listening on various ports. It does so by connecting to the container's
+network stack and attempting to establish a socket with the desired port.
+"""

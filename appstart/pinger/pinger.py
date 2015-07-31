@@ -16,7 +16,28 @@
 # This file conforms to the external style guide.
 # pylint: disable=bad-indentation
 
-"""'Pings' the application by attempting to establish a socket on port 8080."""
+"""Pings the application by trying to establish a socket on the specified port.
+
+When Appstart actually starts the application container, it exposes port 8080
+on the container by mapping some port X on the Docker host to 8080 within the
+application, where X is determined at runtime. For proper behavior, the
+application needs to actually be listening on port 8080. To determine if the
+application is in fact listening on the port, it's not enough to simply
+establish a socket with port X on the Docker host. Due to the way port mappings
+are done, a socket can always be established with port X, even if there's
+nothing listening on 8080 inside the container. To bypass this issue, the
+pinger tries to establish a socket on 8080 from INSIDE the same network stack
+as the application.
+
+The obvious alternative is simply to send a request to port X. Via port
+mapping, the request will arrive at 8080 inside the container. The problem
+with this approach is that the request may actually cause the container
+to change state in an unpredictable way.
+
+To actually run the pinger, a container is created and put on the same network
+stack as the application container. It's then possible to run the pinger via
+docker exec and see its exit status.
+"""
 
 import httplib
 import logging

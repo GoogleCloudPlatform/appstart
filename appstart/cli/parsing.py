@@ -31,22 +31,22 @@ def make_appstart_parser():
         description='Wrapper to run a managed vm container. If '
         'using for the first time, run \'appstart init\' '
         'to generate a devappserver base image.')
-    subparsers = parser.add_subparsers()
+    subparsers = parser.add_subparsers(dest='parser_type')
+
     run_parser = subparsers.add_parser('run')
-    run_parser.set_defaults(parser_type='run')
-    init_parser = subparsers.add_parser('init')
-    init_parser.set_defaults(parser_type='init')
     add_appstart_args(run_parser)
+
+    init_parser = subparsers.add_parser('init')
     add_init_args(init_parser)
     return parser
 
 
 def add_init_args(parser):
     parser.add_argument('--use_cache',
-                        action='store_true',
-                        dest='use_cache',
+                        action='store_false',
+                        dest='nocache',
                         help='Flag to enable usage of cache during init.')
-    parser.set_defaults(use_cache=False)
+    parser.set_defaults(nocache=True)
 
 
 def add_appstart_args(parser):
@@ -56,15 +56,6 @@ def add_appstart_args(parser):
                         help='The name of the docker image to run. '
                         'If no image is specified, one will be '
                         "built from the application's Dockerfile.")
-    parser.add_argument('--run_api_server',
-                        choices=['True', 'true', 'False', 'false'],
-                        nargs=1,
-                        default='True',
-                        action=BoolAction,
-                        help='Specifies whether to run an api server. '
-                        'You do not need one if you do not consume '
-                        'standard Google services such as taskqueue, '
-                        'datastore, logging, etc.')
     parser.add_argument('--application_port',
                         default=8080,
                         type=int,
@@ -111,13 +102,6 @@ def add_appstart_args(parser):
                         default=None,
                         help='The location where this container will '
                         'output logs.')
-    parser.add_argument('--use-cache',
-                        choices=['True', 'true', 'False', 'false'],
-                        nargs=1,
-                        default='True',
-                        action=BoolAction,
-                        help='If false, docker will not use '
-                        'the cache during image builds.')
     parser.add_argument('--timeout',
                         type=int,
                         default=30,
@@ -128,25 +112,27 @@ def add_appstart_args(parser):
                         default=None,
                         help='The relative or absolute path to the '
                         "application\'s .yaml or .xml file.")
+
+    ################################ Flags ###############################
+    parser.add_argument('--no_cache',
+                        action='store_true',
+                        dest='nocache',
+                        help='If flag is set, docker will not use '
+                        'the cache during image builds.')
+    parser.set_defaults(nocache=False)
+
+    parser.add_argument('--no_api_server',
+                        action='store_false',
+                        dest='run_api_server',
+                        help='Specifies whether to run an API server. '
+                        'You do not need one if you do not consume '
+                        'standard Google services such as taskqueue, '
+                        'datastore, logging, etc.')
+    parser.set_defaults(run_api_server=True)
+
     parser.add_argument('--force_version',
                         action='store_true',
                         dest='force_version',
                         help='Force Appstart to run with mismatched docker '
                         'version.')
     parser.set_defaults(force_version=False)
-
-
-# pylint: disable=too-few-public-methods
-class BoolAction(argparse.Action):
-    """Action to parse boolean values."""
-
-    def __init__(self, option_strings, dest, nargs=None, **kwargs):
-        """Call constructor of arpargse.Action."""
-        super(BoolAction, self).__init__(option_strings, dest, **kwargs)
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        """Parse boolean arguments and populate namespace."""
-        if values in ['True', 'true']:
-            setattr(namespace, self.dest, True)
-        elif values in ['False', 'false']:
-            setattr(namespace, self.dest, False)

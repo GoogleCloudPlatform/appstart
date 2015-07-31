@@ -152,6 +152,21 @@ def get_docker_client():
     return client
 
 
+def build_from_directory(dirname, image_name, nocache=False):
+    """Builds devappserver base image from source using a Dockerfile."""
+    dclient = get_docker_client()
+
+    res = dclient.build(path=dirname,
+                        rm=True,
+                        nocache=nocache,
+                        tag=image_name)
+
+    try:
+        log_and_check_build_results(res, image_name)
+    except docker.errors.DockerException as err:
+        raise AppstartAbort(err.message)
+
+
 def make_tar_build_context(dockerfile, context_files):
         """Compose tar file for the new devappserver layer's build context.
 

@@ -12,7 +12,7 @@ import os
 import xml.dom.minidom
 import yaml
 
-import utils
+from .. import utils
 
 
 class ApplicationConfiguration(object):

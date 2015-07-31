@@ -12,36 +12,77 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for appstart.utils."""
+"""Unit tests for utils."""
 
 # This file conforms to the external style guide.
 # pylint: disable=bad-indentation, g-bad-import-order
 
 import io
 import logging
+import os
 import tarfile
 import tempfile
 import unittest
 
-import appstart
-import fake_docker
+import docker
+
+from fakes import fake_docker
+from appstart import utils
 
 
-class DockerBuildResultsTest(unittest.TestCase):
+CERT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                         'test_data/certs')
+APP_DIR = os.path.join(os.path.dirname(__file__), 'system_tests')
+
+
+class DockerTest(unittest.TestCase):
     """Test error detection in Docker build results."""
+
+    def setUp(self):
+        self.old_docker_client = docker.Client
+        docker.Client = fake_docker.FakeDockerClient
+        fake_docker.reset()
+
+    def test_get_docker_client(self):
+        os.environ['DOCKER_HOST'] = 'tcp://192.168.59.103:2376'
+        os.environ['DOCKER_TLS_VERIFY'] = '1'
+        os.environ['DOCKER_CERT_PATH'] = CERT_PATH
+
+        dclient = utils.get_docker_client()
+        self.assertIn('tls', dclient.kwargs)
+        self.assertIn('base_url', dclient.kwargs)
+
+    def test_build_from_directory(self):
+        utils.build_from_directory(APP_DIR, 'test')
+        self.assertEqual(len(fake_docker.images),
+                         1 + len(fake_docker.DEFAULT_IMAGES))
+        self.assertIn('test', fake_docker.images)
 
     def test_failed_build(self):
         bad_build_res = fake_docker.FAILED_BUILD_RES
-        with self.assertRaises(appstart.utils.AppstartAbort):
-            appstart.utils.log_and_check_build_results(bad_build_res, 'temp')
+        with self.assertRaises(utils.AppstartAbort):
+            utils.log_and_check_build_results(bad_build_res, 'temp')
 
     def test_successful_build(self):
         good_build_res = fake_docker.BUILD_RES
-        appstart.utils.log_and_check_build_results(good_build_res, 'temp')
+        utils.log_and_check_build_results(good_build_res, 'temp')
+
+    def test_good_version(self):
+        dclient = fake_docker.FakeDockerClient()
+        utils.check_docker_version(dclient)
+
+    def test_bad_version(self):
+        dclient = fake_docker.FakeDockerClient()
+        dclient.version = lambda: {'Version': '1.6.0'}
+        with self.assertRaises(utils.AppstartAbort):
+            utils.check_docker_version(dclient)
+
+    def tearDown(self):
+        docker.Client = self.old_docker_client
 
 
 class TarTest(unittest.TestCase):
-    """Test the feature in appstart.utils that deal with tarfiles."""
+    """Test the feature in utils that deal with tarfiles."""
 
     def setUp(self):
         self.tempfile1 = tempfile.NamedTemporaryFile()
@@ -57,8 +98,7 @@ class TarTest(unittest.TestCase):
         context_files = {self.tempfile1.name: 'foo.txt',
                          self.tempfile2.name: '/baz/bar.txt'}
 
-        context = appstart.utils.make_tar_build_context(dockerfile,
-                                                        context_files)
+        context = utils.make_tar_build_context(dockerfile, context_files)
         tar = tarfile.TarFile(fileobj=context)
 
         self.assertEqual(tar.extractfile('foo.txt').read(), 'foo')
@@ -87,8 +127,7 @@ class TarTest(unittest.TestCase):
         tar.close()
         temp.seek(0)
 
-        wrapped_tar = appstart.utils.TarWrapper(tarfile.open(mode='r',
-                                                             fileobj=temp))
+        wrapped_tar = utils.TarWrapper(tarfile.open(mode='r', fileobj=temp))
         self.assertEqual(wrapped_tar.read_file('root/bar.txt'), 'bar')
         self.assertEqual(wrapped_tar.read_file('root/baz/foo.txt'), 'foo')
         with self.assertRaises(ValueError):
@@ -104,7 +143,7 @@ class TarTest(unittest.TestCase):
 class LoggerTest(unittest.TestCase):
 
     def test_get_logger(self):
-        logger = appstart.utils.get_logger()
+        logger = utils.get_logger()
         self.assertIsInstance(logger, logging.Logger)
 
 if __name__ == '__main__':

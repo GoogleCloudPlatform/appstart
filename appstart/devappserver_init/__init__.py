@@ -12,4 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilities for starting and manipulating GAE Managed VM containers."""
+"""Package to construct a devappserver base image.
+
+Appstart uses this as a base to run the api servers.
+"""
