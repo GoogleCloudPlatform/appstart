@@ -19,7 +19,7 @@
 # pylint: disable=bad-indentation
 
 import argparse
-
+from ..validator import contract
 
 def make_appstart_parser():
     """Make an argument parser to take in command line arguments.
@@ -43,7 +43,32 @@ def make_appstart_parser():
                                         'run before the first use of '
                                         '"appstart run"')
     add_init_args(init_parser)
+
+    validate_parser = subparsers.add_parser('validate')
+    validate_parser.set_defaults(parser_type='validate')
+    add_validate_args(validate_parser)
+    add_appstart_args(validate_parser)
     return parser
+
+
+def add_validate_args(parser):
+    parser.add_argument('--log_file',
+                        default=None,
+                        help='Logfile to collect validation results.')
+    parser.add_argument('--threshold',
+                        default='WARNING',
+                        choices=[name for _, name in
+                                 contract.LEVEL_NAMES.iteritems()],
+                        help='The threshold at which validation should fail.')
+    parser.add_argument('--tags',
+                        nargs='*',
+                        help='Tag names of the tests to run')
+    parser.add_argument('--verbose',
+                        action='store_true',
+                        dest='verbose',
+                        help='Whether to emit verbose output to stdout.')
+    parser.set_defaults(verbose=False)
+
 
 
 def add_init_args(parser):

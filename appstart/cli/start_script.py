@@ -32,6 +32,8 @@ from .. import devappserver_init
 from .. import pinger
 from .. import utils
 from ..sandbox import container_sandbox
+from ..validator import contract
+from ..validator import runtime_contract
 
 import parsing
 
@@ -82,9 +84,30 @@ def main():
                 utils.get_logger().warning(str(err.message))
             sys.exit(1)
 
-    # This should not be reached
-    sys.exit(1)
-
+    # In response to 'appstart validate', attempt to perform validation.
+    elif parser_type == 'validate':
+        logfile = args.pop('log_file')
+        threshold = args.pop('threshold')
+        tags = args.pop('tags')
+        verbose = args.pop('verbose')
+        success = False
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                validator = contract.ContractValidator(args, runtime_contract)
+                success = validator.validate(tags, threshold, logfile, verbose)
+        except KeyboardInterrupt:
+            utils.get_logger().info('Exiting')
+        except utils.AppstartAbort as err:
+            if err.message:
+                utils.get_logger().warning(err.message)
+        if success:
+            sys.exit(0)
+        sys.exit('Validation failed')
+    
+    else:
+        # This should not be reached
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()

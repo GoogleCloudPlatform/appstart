@@ -168,43 +168,43 @@ def build_from_directory(dirname, image_name, nocache=False):
 
 
 def make_tar_build_context(dockerfile, context_files):
-        """Compose tar file for the new devappserver layer's build context.
+    """Compose tar file for the new devappserver layer's build context.
 
-        Args:
-            dockerfile: (io.BytesIO or file) a file-like object
-                representing the Dockerfile.
-            context_files: ({basestring: basestring, ...}) a dictionary
-                mapping absolute filepaths to their destination name in
-                the tar build context. This is used to specify other files
-                that should be added to the build context.
+    Args:
+        dockerfile: (io.BytesIO or file) a file-like object
+            representing the Dockerfile.
+        context_files: ({basestring: basestring, ...}) a dictionary
+            mapping absolute filepaths to their destination name in
+            the tar build context. This is used to specify other files
+            that should be added to the build context.
 
-        Returns:
-            (tempfile.NamedTemporaryFile) a temporary tarfile
-            representing the docker build context.
-        """
+    Returns:
+        (tempfile.NamedTemporaryFile) a temporary tarfile
+        representing the docker build context.
+    """
 
-        f = tempfile.NamedTemporaryFile()
-        t = tarfile.open(mode='w', fileobj=f)
+    f = tempfile.NamedTemporaryFile()
+    t = tarfile.open(mode='w', fileobj=f)
 
-        # Add dockerfile to top level under the name "Dockerfile"
-        if isinstance(dockerfile, io.BytesIO):
-            dfinfo = tarfile.TarInfo('Dockerfile')
-            dfinfo.size = len(dockerfile.getvalue())
-            dockerfile.seek(0)
-        else:
-            dfinfo = t.gettarinfo(fileobj=dockerfile, arcname='Dockerfile')
-        t.addfile(dfinfo, dockerfile)
+    # Add dockerfile to top level under the name "Dockerfile"
+    if isinstance(dockerfile, io.BytesIO):
+        dfinfo = tarfile.TarInfo('Dockerfile')
+        dfinfo.size = len(dockerfile.getvalue())
+        dockerfile.seek(0)
+    else:
+        dfinfo = t.gettarinfo(fileobj=dockerfile, arcname='Dockerfile')
+    t.addfile(dfinfo, dockerfile)
 
-        # Open all of the context files and add them to the tarfile.
-        for path in context_files:
-            with open(path) as file_object:
-                file_info = t.gettarinfo(fileobj=file_object,
-                                         arcname=context_files[path])
-                t.addfile(file_info, file_object)
+    # Open all of the context files and add them to the tarfile.
+    for path in context_files:
+        with open(path) as file_object:
+            file_info = t.gettarinfo(fileobj=file_object,
+                                     arcname=context_files[path])
+            t.addfile(file_info, file_object)
 
-        t.close()
-        f.seek(0)
-        return f
+    t.close()
+    f.seek(0)
+    return f
 
 
 class TarWrapper(object):

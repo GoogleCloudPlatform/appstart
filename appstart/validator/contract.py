@@ -26,7 +26,8 @@ import logging
 import time
 import unittest
 
-import appstart
+from ..sandbox import container_sandbox
+
 import color_logging
 
 ################################################################################
@@ -152,6 +153,8 @@ class ContractTestResult(unittest.TextTestResult):
 
     def addSkip(self, test, reason):
         unittest.TestResult.addSkip(self, test, reason)
+        message = self.__make_message(test, self.SKIP)
+        self.stream.writeln(message, lvl=logging.DEBUG)
 
     def addError(self, test, err):
         """Wrapper around grandparent's addError.
@@ -280,7 +283,7 @@ class ContractTestRunner(unittest.TextTestRunner):
     ContractTestRunner corresponds to a single _TIMELINE point.
     """
 
-    def __init__(self, success_set, threshold, logfile):
+    def __init__(self, success_set, threshold, logfile, verbose_printing):
         """Create a ContractTestRunner.
 
         Args:
@@ -291,10 +294,12 @@ class ContractTestRunner(unittest.TextTestRunner):
                 failure if and only if a test with an error_level greater
                 than threshold fails.
             logfile: (basestring) The logfile to append messages to.
+            verbose_printing: (bool) Whether or not to create a verbose
+                LoggingStream (one that prints to console verbosely).
         """
         super(ContractTestRunner, self).__init__()
         self.__threshold = threshold
-        self.stream = color_logging.LoggingStream(logfile)
+        self.stream = color_logging.LoggingStream(logfile, verbose_printing)
         self.__success_set = success_set
 
     def _makeResult(self):
@@ -325,7 +330,7 @@ class ContractTestRunner(unittest.TextTestRunner):
             (ContractTestResult) The result of the tests.
         """
         self.stream.writeln()
-        self.stream.writeln('%(bold)s Running tests: {0} %(end)s'.format(point))
+        self.stream.writeln('%(bold)sRunning tests: {0} %(end)s'.format(point))
         result = self._makeResult()
         unittest.signals.registerResult(result)
         result.failfast = self.failfast
@@ -386,27 +391,35 @@ class ContractClause(unittest.TestCase):
     #     that are essential to the operation of a container should
     #     have a higher level than clauses that assert trivial
     #     conditions.
+    # tags: ([basestring, ...]) Tags are a list of string identifiers
+    #     associated with the ContractClause. They allow a subset of
+    #     ContractClauses from a module to be run; the runner of validator
+    #     can pass a list of tags, and the ContractClause will only be
+    #     evaluated if one of its tags appears in the list. By default,
+    #     a clause will be tagged with its own class name.
     # dependencies: ([class, ...]) A list of classes that inherit
     #     from ContractClause. A clause will be evaluated if and only
     #     if the clauses in this list pass.
 
     lifecyle_point = None
-    error_level = logging.info
+    error_level = UNUSED
     dependencies = []
     description = None
+    tags = None
     title = None
 
     def __init__(self, sandbox):
         """Initializer for ContractClause.
 
         Args:
-            sandbox: (appstart.ContainerSandbox) A sandbox that manages
-                the container to be tested.
+            sandbox: (sandbox.container_sandbox.ContainerSandbox)
+                A sandbox that manages the container to be tested.
         Raises:
             KeyError: If lifecyle_point is not a valid lifecyle point or
                 if error_level is not a valid error level.
             AttributeError: If the clause does not have the attributes
                 enumerated in _REQUIRED_ATTRIBUTES.
+            ValueError: If the clause's 'tags' attribute is not a list.
         """
         for attr in ['lifecyle_point', 'title', 'description']:
             if not getattr(self, attr, None):
@@ -423,6 +436,12 @@ class ContractClause(unittest.TestCase):
         if self.error_level not in LEVEL_NAMES.keys():
             raise KeyError('{0} does not have a valid error '
                            'level.'.format(self.__class__.__name__))
+
+        self.tags = self.tags or []
+        if not isinstance(self.tags, list):
+            raise ValueError('"tags" attribute must be a list')
+
+        self.tags.append(self.__class__.__name__)
 
         # Register the function 'run_test' to be executed as the
         # test driver.
@@ -441,7 +460,7 @@ class ContractClause(unittest.TestCase):
         """A test that checks if the container is fulfilling the clause.
 
         Args:
-            app_container: (appstart.container.Container) The container
+            app_container: (sandbox.container.Container) The container
                 to be tested
         """
         raise NotImplementedError('evaluate_clause must be implemented '
@@ -461,7 +480,8 @@ class ContractValidator(object):
                 be used to make the contract.
         """
         self.contract = {}
-        self.sandbox = appstart.ContainerSandbox(**sandbox_kwargs)
+        self.sandbox = container_sandbox.ContainerSandbox(
+            **sandbox_kwargs)
 
         # Set of clauses that have been added to the contract.
         self.__added_clauses = set()
@@ -470,6 +490,7 @@ class ContractValidator(object):
         self.__success_set = set()
 
         self.__construct_contract(contract_module)
+        self._tags = []
 
     def __construct_contract(self, module):
         """Recursively add clauses to the contract."""
@@ -591,26 +612,49 @@ class ContractValidator(object):
                 if dependency_class not in self.__success_set:
                     raise unittest.SkipTest(
                         '"{0}" did not pass'.format(dependency_class.title))
-            return func(*args, **kwargs)
+            if self._tags:
+                for tag in clause.tags:
+                    if tag in self._tags:
+                        return func(*args, **kwargs)
+                raise unittest.SkipTest('Clause is tagged with: {0}. '
+                                        'Currently running: '
+                                        '{1}'.format(clause.tags, self._tags))
+            else:
+                return func(*args, **kwargs)
+
         return _wrapper
 
-    def validate(self, threshold=WARNING, logfile=None):
+    def validate(self, tags, threshold='WARNING', logfile=None, verbose=False):
         """Evaluate all clauses.
 
         Args:
+            tags: ([basestring, ...]) A list of tags to identify the
+                desired tests to run. A clause will only be evaluated if
+                it contains a tag that appears in this list.
             threshold: (int) One of the error levels as specified above
                 in the LEVEL_NAMES global var. Validation will result in
                 failure if and only if a test with an error_level greater
                 than threshold fails.
             logfile: (basestring or None) The name of the log file to append
                 to.
+            verbose: (bool) Whether or not to run tests verbosely. If False,
+                some non-essential information is ommitted from the output
+                printed to stdout. Note that ALL information is logged to
+                the logfile, if one is specified.
 
         Returns:
             (bool) True if validation was successful. False otherwise.
         """
+        self._tags.extend(tags or [])
+        for level, name in LEVEL_NAMES.iteritems():
+            if name == threshold:
+                threshold = level
+                break
+
         test_runner = ContractTestRunner(self.__success_set,
                                          threshold=threshold,
-                                         logfile=logfile)
+                                         logfile=logfile,
+                                         verbose_printing=verbose)
         validation_passed = True
         try:
             self.sandbox.start()

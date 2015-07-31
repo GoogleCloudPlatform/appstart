@@ -34,7 +34,7 @@ class LogfileHandler(logging.FileHandler):
 class LoggingStream(object):
     """A fake 'stream' to be used for logging in tests."""
 
-    def __init__(self, logfile, formatter=None):
+    def __init__(self, logfile, verbose_printing, formatter=None):
         self.__logger = logging.getLogger('validator')
         self.__logger.setLevel(logging.DEBUG)
 
@@ -43,7 +43,8 @@ class LoggingStream(object):
 
         # Stream handler prints to console.
         stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(logging.INFO)
+        stream_handler.setLevel(logging.DEBUG if verbose_printing
+                                else logging.INFO)
 
         # Color formatter replaces colors (like {red}, {warn}, etc) with ansi
         # escape sequences.

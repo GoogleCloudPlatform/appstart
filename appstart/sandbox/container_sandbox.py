@@ -287,13 +287,15 @@ class ContainerSandbox(object):
         #     same network stack as devappserver.
         # MODULE_YAML_PATH specifies the path to the app from the
         #     app directory
+
+        # TODO (find in g3 and link to here via comment)
         app_env = {'API_HOST': '0.0.0.0',
                    'API_PORT': self.internal_api_port,
                    'GAE_LONG_APP_ID': self.app_id,
                    'GAE_PARTITION': 'dev',
                    'GAE_MODULE_INSTANCE': '0',
                    'MODULE_YAML_PATH': os.path.basename(self.conf_path),
-                   'GAE_MODULE_NAME': 'default',
+                   'GAE_MODULE_NAME': 'default',  # TODO(gouzenko) parse app.yaml
                    'GAE_MODULE_VERSION': '1',
                    'GAE_SERVER_PORT': '8080',
                    'USE_MVM_AGENT': 'true'}
