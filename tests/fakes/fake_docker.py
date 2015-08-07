@@ -19,6 +19,7 @@ This class is used for unit testing ContainerSandbox.
 # This file conforms to the external style guide.
 # pylint: disable=bad-indentation
 
+import requests
 import uuid
 
 import docker
@@ -101,7 +102,7 @@ class FakeDockerClient(object):
         return BUILD_RES
 
     def inspect_container(self, container_id):
-        cont = self.__find_container(container_id)
+        cont = find_container(container_id)
         return {'Name': cont['Name'],
                 'Id': cont['Id'],
                 'State': {'Running': cont['Running']}}
@@ -113,7 +114,8 @@ class FakeDockerClient(object):
         if 'name' not in kwargs:
             raise KeyError('appstart should not make unnamed containers.')
         if kwargs['image'] not in images:
-            raise RuntimeError('the specified image does not exist.')
+            raise docker.errors.APIError('the specified image does not exist.',
+                                         requests.Response())
 
         # Create a unique id for the container.
         container_id = str(uuid.uuid4())
@@ -128,12 +130,12 @@ class FakeDockerClient(object):
 
     def kill(self, cont_id):
         """Imitate docker.Client.kill."""
-        cont_to_kill = self.__find_container(cont_id)
+        cont_to_kill = find_container(cont_id)
         cont_to_kill['Running'] = False
 
     def remove_container(self, cont_id):
         """Imitate docker.Client.remove_container."""
-        cont_to_rm = self.__find_container(cont_id)
+        cont_to_rm = find_container(cont_id)
         if cont_to_rm['Running']:
             raise RuntimeError('tried to remove a running container.')
         removed_containers.append(cont_to_rm)
@@ -141,12 +143,13 @@ class FakeDockerClient(object):
 
     def start(self, cont_id, **kwargs):  # pylint: disable=unused-argument
         """Imitate docker.Client.start."""
-        cont_to_start = self.__find_container(cont_id)
+        cont_to_start = find_container(cont_id)
         cont_to_start['Running'] = True
 
-    def __find_container(self, cont_id):
-        """Helper function to find a container based on id."""
-        for cont in containers:
-            if cont['Id'] == cont_id:
-                return cont
-        raise docker.errors.APIError('container was not found.')
+
+def find_container(cont_id):
+    """Helper function to find a container based on id."""
+    for cont in containers:
+        if cont['Id'] == cont_id:
+            return cont
+    raise docker.errors.APIError('container was not found.', requests.Response())

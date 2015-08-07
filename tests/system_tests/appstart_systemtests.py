@@ -27,7 +27,7 @@ import requests
 import time
 import unittest
 
-from appstart import container_sandbox
+from appstart.sandbox import container_sandbox
 
 import services_test_app
 

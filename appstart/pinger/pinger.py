@@ -29,10 +29,11 @@ nothing listening on 8080 inside the container. To bypass this issue, the
 pinger tries to establish a socket on 8080 from INSIDE the same network stack
 as the application.
 
-The obvious alternative is simply to send a request to port X. Via port
-mapping, the request will arrive at 8080 inside the container. The problem
-with this approach is that the request may actually cause the container
-to change state in an unpredictable way.
+The alternative is simply to send an actual request to port X. Due to the port
+mapping, docker would attempt to forward the request to 8080 inside the
+container. The response can then be examined to see if a service is listening.
+The problem with this approach is that the request may actually cause the
+container to change state in an unpredictable way.
 
 To actually run the pinger, a container is created and put on the same network
 stack as the application container. It's then possible to run the pinger via

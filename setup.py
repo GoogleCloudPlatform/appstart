@@ -25,7 +25,7 @@ import os
 
 here = os.path.abspath(os.path.dirname(__file__))
 
-with codecs.open(os.path.join(here, 'README.rst'), encoding='utf-8') as f:
+with codecs.open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
@@ -51,7 +51,7 @@ setup(
         'Programming Language :: Python :: 3.4',
     ],
     keywords='GAE Google App Engine appengine development docker',
-    packages=find_packages(exclude='test'),
+    packages=find_packages(exclude='tests'),
     package_data={'appstart.devappserver_init': ['Dockerfile', 'das.sh'],
                   'appstart.pinger': ['Dockerfile'],
                   'appstart.sandbox': ['app.yaml']},

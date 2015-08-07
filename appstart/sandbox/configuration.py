@@ -10,6 +10,7 @@ These include appengine-web.xml files and *.yaml files.
 
 import os
 import xml.dom.minidom
+from xml.parsers import expat
 import yaml
 
 from .. import utils
@@ -33,19 +34,19 @@ class ApplicationConfiguration(object):
             utils.AppstartAbort: If the config file neither ends with .yaml
                 nor is an appengine-web.xml file.
         """
-        self.verify_structure(config_file)
+        self._verify_structure(config_file)
         if config_file.endswith('.yaml'):
-            self.__init_from_yaml_config(config_file)
+            self._init_from_yaml_config(config_file)
             self.is_java = False
         elif os.path.basename(config_file) == 'appengine-web.xml':
-            self.__init_from_xml_config(config_file)
+            self._init_from_xml_config(config_file)
             self.is_java = True
         else:
             raise utils.AppstartAbort('{0} is not a valid '
                                       'configuration file. Use either a .yaml '
                                       'file or .xml file.'.format(config_file))
 
-    def __init_from_xml_config(self, xml_config):
+    def _init_from_xml_config(self, xml_config):
         """Initialize from an xml file.
 
         Args:
@@ -56,7 +57,11 @@ class ApplicationConfiguration(object):
             utils.AppstartAbort: If "<vm>true</vm>" is not set in the
                 configuration.
         """
-        root = xml.dom.minidom.parse(xml_config).firstChild
+        try:
+            root = xml.dom.minidom.parse(xml_config).firstChild
+        except expat.ExpatError:
+            raise utils.AppstartAbort('Malformed xml file: '
+                                      '{0}'.format(xml_config))
         try:
             vm = root.getElementsByTagName('vm')[0]
             assert vm.firstChild.nodeValue == 'true'
@@ -75,7 +80,7 @@ class ApplicationConfiguration(object):
                 if value and value.nodeValue != 'true':
                     self.health_checks_enabled = False
 
-    def __init_from_yaml_config(self, yaml_config):
+    def _init_from_yaml_config(self, yaml_config):
         """Initialize from a yaml file.
 
         Args:
@@ -86,6 +91,9 @@ class ApplicationConfiguration(object):
             utils.AppstartAbort: if "vm: true" is not set in the configuration.
         """
         yaml_dict = yaml.load(open(yaml_config))
+        if not isinstance(yaml_dict, dict):
+            raise utils.AppstartAbort('Malformed yaml file: '
+                                      '{0}'.format(yaml_config))
         if not yaml_dict.get('vm'):
             raise utils.AppstartAbort(
                 '"vm: true" must be set in '
@@ -97,7 +105,7 @@ class ApplicationConfiguration(object):
             self.health_checks_enabled = True
 
     @staticmethod
-    def verify_structure(full_config_file_path):
+    def _verify_structure(full_config_file_path):
         """Verify the existence of the configuration files.
 
         If the config file is an xml file, there also

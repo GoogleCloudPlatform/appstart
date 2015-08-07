@@ -8,7 +8,7 @@ python $(find $SDK_ROOT -name dev_appserver.py) \
     --admin_port=$ADMIN_PORT \
     --application=$APP_ID \
     --auth_domain=gmail.com \
-    --clear_datastore=False \
+    --clear_datastore=$CLEAR_DATASTORE \
     --datastore_consistency_policy=time \
     --dev_appserver_log_level=info \
     --enable_cloud_datastore=False \

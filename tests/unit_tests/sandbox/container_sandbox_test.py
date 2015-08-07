@@ -5,6 +5,7 @@
 
 import logging
 import os
+import tempfile
 import unittest
 
 import docker
@@ -18,14 +19,17 @@ from fakes import fake_docker
 
 class TestBase(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        test_directory = tempfile.mkdtemp()
+        app_yaml = 'vm: true'
+        cls.conf_file = open(os.path.join(test_directory, 'app.yaml'), 'w')
+        cls.conf_file.write(app_yaml)
+        cls.conf_file.close()
+
     def setUp(self):
         self.old_docker_client = docker.Client
         docker.Client = fake_docker.FakeDockerClient
-
-        test_directory = os.path.dirname(os.path.realpath(__file__))
-        conf_file = os.path.join('./tests/test_data/fake_app', 'app.yaml')
-
-        self.sandbox = sandbox.container_sandbox.ContainerSandbox(conf_file)
         self.mocker = mox.Mox()
         fake_docker.reset()
 
@@ -37,25 +41,62 @@ class TestBase(unittest.TestCase):
 
 
 # pylint: disable=too-many-public-methods
-class CreateContainersTest(TestBase):
-    """Test the creation of containers."""
+class CreateAndRemoveContainersTest(TestBase):
+    """Test the full code paths associated with starting the sandbox."""
 
     def setUp(self):
-        super(CreateContainersTest, self).setUp()
+        super(CreateAndRemoveContainersTest, self).setUp()
         self.old_ping = (
             sandbox.container.PingerContainer.ping_application_container)
+
+        # Fake out ping. Under the hood, this is a docker exec.
         sandbox.container.PingerContainer.ping_application_container = (
             lambda self: True)
 
+        # Fake out stream_logs, as this will try to start another thread.
         self.old_logs = sandbox.container.Container.stream_logs
         sandbox.container.Container.stream_logs = (
             lambda unused_self, unused_stream=True: None)
 
-    def test_create_and_run_containers(self):
-        """Test ContainerSandbox.create_and_run_containers."""
-        self.sandbox.create_and_run_containers()
+    def test_start_from_conf(self):
+        """Test ContainerSandbox.start."""
+        sb = sandbox.container_sandbox.ContainerSandbox(self.conf_file.name)
+        sb.start()
+
+        self.assertIsNotNone(sb.app_container)
+        self.assertIsNotNone(sb.devappserver_container)
+        self.assertIsNotNone(sb.app_container)
+
+    def test_start_no_api_server(self):
+        """Test ContainerSandbox.start (with no api server)."""
+        sb = sandbox.container_sandbox.ContainerSandbox(self.conf_file.name,
+                                                        run_api_server=False)
+        sb.start()
+        self.assertIsNotNone(sb.app_container)
+        self.assertIsNotNone(sb.app_container)
+        self.assertIsNone(sb.devappserver_container)
+
+    def test_start_from_image(self):
+        sb = sandbox.container_sandbox.ContainerSandbox(image_name='test_image')
+        with self.assertRaises(utils.AppstartAbort):
+            sb.start()
+
+        fake_docker.reset()
+        fake_docker.images.append('test_image')
+        sb.start()
+
+        self.assertEqual(len(fake_docker.images),
+                         len(fake_docker.DEFAULT_IMAGES) + 2,
+                         'Too many images created')
+
+    def test_start_no_image_no_conf(self):
+        with self.assertRaises(utils.AppstartAbort):
+            sandbox.container_sandbox.ContainerSandbox()
 
     def tearDown(self):
+        super(CreateAndRemoveContainersTest, self).tearDown()
+
+        # Reset everything
         sandbox.container.PingerContainer.ping_application_container = (
             self.old_ping)
         sandbox.container.Container.stream_logs = self.old_logs
@@ -73,7 +114,7 @@ class BadVersionTest(unittest.TestCase):
         """
         docker.Client.version = lambda _: {'Version': '1.6.0'}
         with self.assertRaises(utils.AppstartAbort):
-            _ = sandbox.container_sandbox.ContainerSandbox(image_name='temp')
+            sandbox.container_sandbox.ContainerSandbox(image_name='temp')
 
 
 class ExitTest(TestBase):
@@ -86,8 +127,11 @@ class ExitTest(TestBase):
         just run successfully.
         """
         super(ExitTest, self).setUp()
-
-        # Also add the containers to the sandbox
+        self.sandbox = sandbox.container_sandbox.ContainerSandbox(
+            self.conf_file.name)
+        # Add the containers to the sandbox. Mock them out (we've tested the
+        # containers elsewhere, and we just need the appropriate methods to be
+        # called).
         self.sandbox.app_container = (
             self.mocker.CreateMock(sandbox.container.ApplicationContainer))
 
@@ -97,6 +141,8 @@ class ExitTest(TestBase):
         self.sandbox.pinger_container = (
             self.mocker.CreateMock(sandbox.container.PingerContainer))
 
+        # TODO(gouzenko): Figure out how to make order not matter (among the
+        # three containers).
         self.sandbox.app_container.running().AndReturn(True)
         self.sandbox.app_container.get_id().AndReturn('456')
         self.sandbox.app_container.kill()
@@ -117,17 +163,26 @@ class ExitTest(TestBase):
         self.sandbox.stop()
 
     def test_exception_handling(self):
-        """Test the case where an exception was raised in __enter__."""
+        """Test the case where an exception was raised in start().
+
+        The sandbox should stop and remove all containers before
+        re-raising the exception.
+        """
+
         def excep_func():
             """Simulate arbitrary exception."""
-            raise Exception()
+            raise Exception
+
         self.sandbox.create_and_run_containers = excep_func
 
         with self.assertRaises(Exception):
             self.sandbox.start()
 
 
-class StaticTest(TestBase):
+class StaticTest(unittest.TestCase):
+
+    def setUp(self):
+        self.sandbox = sandbox.container_sandbox.ContainerSandbox
 
     def test_get_web_xml(self):
         self.assertEqual(self.sandbox.get_web_xml('/conf/appengine-web.xml'),

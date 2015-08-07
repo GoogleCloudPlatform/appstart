@@ -23,38 +23,40 @@ from appstart import sandbox
 from fakes import fake_docker
 
 
-class TestContainerInitExit(unittest.TestCase):
+class TestContainerExit(unittest.TestCase):
 
     def setUp(self):
         # Simulate that a SIGINT was caught by setting global _EXITING var
         sandbox.container._EXITING = True
+        fake_docker.reset()
         self.dclient = fake_docker.FakeDockerClient()
 
         # Pretend that we've created an image called 'temp'
         fake_docker.images.append('temp')
 
-    def test_exit_from_init(self):
+    def test_exit_from_create(self):
         # container should detect that a KeyboardInterrupt was raised and
         # manually raise it again.
+        container = sandbox.container.Container(self.dclient)
         with self.assertRaises(KeyboardInterrupt):
-            container = sandbox.container.Container(self.dclient)
             container.create(name='temp', image='temp')
+        self.assertIsNotNone(container._container_id)
 
     def tearDown(self):
         sandbox.container._EXITING = False
-        fake_docker.reset()
 
 
 class TestContainer(unittest.TestCase):
 
     def setUp(self):
         self.dclient = fake_docker.FakeDockerClient()
+        fake_docker.reset()
         fake_docker.images.append('temp')
         self.cont = sandbox.container.Container(self.dclient)
         self.cont.create(name='temp',
                          image='temp')
 
-    def test_init(self):
+    def test_create(self):
         # Ensure that only one container was created.
         self.assertEqual(len(fake_docker.containers),
                          1,
@@ -71,25 +73,38 @@ class TestContainer(unittest.TestCase):
         self.assertFalse(created_container['Running'],
                          '__init__ should not start container')
 
-        # Ensure the correct host.
+        # Ensure the correct host. (Note that the host is a result of
+        # hardcoding the base_url in fake_docker.py
         self.assertEqual(self.cont.host,
                          '0.0.0.0',
                          'Hosts do not match.')
 
     def test_kill(self):
+        # Ensure that the container stops running in response to 'kill'
         fake_docker.containers[0]['Running'] = True
         self.cont.kill()
+        self.assertFalse(self.cont.running(),
+                         'Container believes itself to be running')
         self.assertFalse(fake_docker.containers[0]['Running'],
                          'Container was left running')
 
+        # Containers can be more than once, so this should pass without error
+        self.cont.kill()
+
     def test_remove(self):
+        # Ensure that the container is removed when 'remove' is called.
         self.cont.remove()
         self.assertEqual(len(fake_docker.containers),
                          0,
                          'Container was not removed')
 
+        # Containers can be removed more than once
+        self.cont.remove()
+
     def test_start(self):
         self.cont.start()
+        self.assertTrue(self.cont.running(),
+                        'Container does not think itself to be running')
         self.assertTrue(fake_docker.containers[0]['Running'],
                         'Container is not running')
 
@@ -97,9 +112,6 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(self.cont.get_id(),
                          fake_docker.containers[0]['Id'],
                          'Container IDs do not match')
-
-    def tearDown(self):
-        fake_docker.reset()
 
 if __name__ == '__main__':
     unittest.main()

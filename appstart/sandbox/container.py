@@ -47,11 +47,12 @@ class Container(object):
             dclient: (docker.Client) The docker client that is managing
                 the container.
         """
-        self.__container_id = None
-        self.__dclient = dclient
-        res = urlparse.urlparse(self.__dclient.base_url)
+        self._container_id = None
+        self._dclient = dclient
+        res = urlparse.urlparse(self._dclient.base_url)
         self.host = (res.hostname if res.hostname != 'localunixsocket'
                      else 'localhost')
+        self.name = None
 
     def create(self, **docker_kwargs):
         """Do the work of calling docker.Client.create_container.
@@ -77,8 +78,12 @@ class Container(object):
         # level error handling, which should remove the container.
         # This solves the problem where create_container gets interrupted
         # AFTER the container is created but BEFORE a result is returned.
-        self.__container_id = (
-            self.__dclient.create_container(**docker_kwargs).get('Id'))
+        try:
+            self._container_id = (
+                self._dclient.create_container(**docker_kwargs).get('Id'))
+        except docker.errors.APIError as err:
+            raise utils.AppstartAbort('Could not create container because: '
+                                      '{0}'.format(err))
 
         # Restore previous handler
         signal.signal(signal.SIGINT, prev)
@@ -87,22 +92,24 @@ class Container(object):
         if _EXITING:
             raise KeyboardInterrupt
 
+        self.name = docker_kwargs.get('name')
+
     def kill(self):
         """Kill the underlying container."""
 
         # "removed" container is occasionally killed in ContainerSandbox.
         # Stay silent about this scenario.
-        if self.__container_id:
-            self.__dclient.kill(self.__container_id)
+        if self._container_id:
+            self._dclient.kill(self._container_id)
 
     def remove(self):
         """Remove the underlying container."""
 
         # Containers are occasionally removed twice in ContainerSandbox.
         # Stay silent about this scenario.
-        if self.__container_id:
-            self.__dclient.remove_container(self.__container_id)
-            self.__container_id = None
+        if self._container_id:
+            self._dclient.remove_container(self._container_id)
+            self._container_id = None
 
     def start(self, **start_kwargs):
         """Start the container.
@@ -112,7 +119,8 @@ class Container(object):
                 docker.Client.start.
         """
         try:
-            self.__dclient.start(self.__container_id, **start_kwargs)
+            self._dclient.start(self._container_id, **start_kwargs)
+            utils.get_logger().info('Starting container: {0}'.format(self.name))
         except docker.errors.APIError as err:
             raise utils.AppstartAbort('Docker error: {0}'.format(err))
 
@@ -131,14 +139,14 @@ class Container(object):
             # docker client is created, it establishes a timeout. The
             # default is 60 seconds. If docker.Client.logs hangs for
             # more than 60 seconds, this is considered a "timeout".
-            name = (self.__dclient.inspect_container(self.__container_id)
+            name = (self._dclient.inspect_container(self._container_id)
                     .get('Name'))
             while True:
                 try:
                     # If a timeout happens, an error will be raise from inside
                     # the log generator.
-                    logs = self.__dclient.logs(container=self.__container_id,
-                                               stream=True)
+                    logs = self._dclient.logs(container=self._container_id,
+                                              stream=True)
                     for line in logs:
                         utils.get_logger().info('{0}: {1}'.format(name,
                                                                   line.strip()))
@@ -160,8 +168,8 @@ class Container(object):
             thread = threading.Thread(target=log_streamer)
             thread.start()
         else:
-            logs = self.__dclient.logs(container=self.__container_id,
-                                       stream=False)
+            logs = self._dclient.logs(container=self._container_id,
+                                      stream=False)
             for line in logs.split('\n'):
                             utils.get_logger().info(line.strip())
 
@@ -171,13 +179,13 @@ class Container(object):
         Returns:
             (bool) Whether or not the container is running.
         """
-        if not self.__container_id:
+        if not self._container_id:
             return False
-        res = self.__dclient.inspect_container(self.__container_id)
+        res = self._dclient.inspect_container(self._container_id)
         return res['State']['Running']
 
     def get_id(self):
-        return self.__container_id
+        return self._container_id
 
     def execute(self, cmd, **create_kwargs):
         """Execute the command specified by cmd inside the container.
@@ -190,11 +198,11 @@ class Container(object):
         Returns:
             (dict) A dict of values as returned by docker.Client.exec_inspect.
         """
-        exec_id = self.__dclient.exec_create(container=self.__container_id,
-                                             cmd=cmd,
-                                             **create_kwargs).get('Id')
-        self.__dclient.exec_start(exec_id)
-        return self.__dclient.exec_inspect(exec_id)
+        exec_id = self._dclient.exec_create(container=self._container_id,
+                                            cmd=cmd,
+                                            **create_kwargs).get('Id')
+        self._dclient.exec_start(exec_id)
+        return self._dclient.exec_inspect(exec_id)
 
     def extract_tar(self, path):
         """Extract the file/directory specified by path as a TarWrapper object.
@@ -211,7 +219,7 @@ class Container(object):
             (utils.TarWrapper) The tar archive.
         """
         try:
-            reply = self.__dclient.copy(self.__container_id, path)
+            reply = self._dclient.copy(self._container_id, path)
         except docker.errors.APIError:
             raise utils.AppstartAbort('File could not be '
                                       'found at {0}.'.format(path))

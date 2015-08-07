@@ -136,3 +136,10 @@ def add_appstart_args(parser):
                         help='Force Appstart to run with mismatched docker '
                         'version.')
     parser.set_defaults(force_version=False)
+
+    parser.add_argument('--clear_datastore',
+                        action='store_true',
+                        dest='clear_datastore',
+                        help='Clear the contents of the datastore before '
+                        'running the application.')
+    parser.set_defaults(clear_datastore=False)

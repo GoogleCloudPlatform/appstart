@@ -77,6 +77,7 @@ class ContainerSandbox(object):
                  application_id=None,
                  application_port=8080,
                  admin_port=8000,
+                 clear_datastore=False,
                  internal_admin_port=32768,
                  internal_api_port=32769,
                  internal_proxy_port=32770,
@@ -131,6 +132,9 @@ class ContainerSandbox(object):
                 should be mapped to the admin server, which runs inside
                 the devappserver container. The admin panel will be
                 accessible through this port.
+            clear_datastore: (bool) Whether or not to clear the datastore.
+                If True, this eliminates all of the data from the datastore
+                before running the api server.
             internal_admin_port: (int) The port INSIDE the devappserver
                 container that the admin panel binds to. Because this
                 is internal to the container, it can be defaulted.
@@ -170,6 +174,7 @@ class ContainerSandbox(object):
         self.internal_api_port = internal_api_port
         self.internal_proxy_port = internal_proxy_port
         self.internal_admin_port = internal_admin_port
+        self.clear_datastore = clear_datastore
         self.port = application_port
         self.storage_path = storage_path
         self.log_path = (
@@ -188,8 +193,6 @@ class ContainerSandbox(object):
 
         if config_file:
             self.conf_path = os.path.abspath(config_file)
-            self.app_dir = (self.app_directory_from_config(self.conf_path)
-                            if not image_name else None)
         else:
             if not image_name:
                 raise utils.AppstartAbort('At least one of config_file and '
@@ -198,6 +201,8 @@ class ContainerSandbox(object):
                                           'app.yaml')
         self.application_configuration = (
             configuration.ApplicationConfiguration(self.conf_path))
+
+        self.app_dir = self.app_directory_from_config(self.conf_path)
 
         # For Java apps, the xml file must be offset by WEB-INF.
         # Otherwise, devappserver will think that it's a non-java app.
@@ -234,6 +239,7 @@ class ContainerSandbox(object):
             # to know where to find the config file, which port to
             # run the proxy on, and which port to run the api server on.
             das_env = {'APP_ID': self.app_id,
+                       'CLEAR_DATASTORE': self.clear_datastore,
                        'PROXY_PORT': self.internal_proxy_port,
                        'API_PORT': self.internal_api_port,
                        'ADMIN_PORT': self.internal_admin_port,
@@ -335,8 +341,12 @@ class ContainerSandbox(object):
         # Start as a shared network container, putting the application
         # on devappserver's network stack. (If devappserver is not
         # running, network_mode is None).
-        self.app_container.start(network_mode=network_mode)
-        get_logger().info('Starting container: %s', app_container_name)
+        try:
+            self.app_container.start(network_mode=network_mode)
+        except utils.AppstartAbort:
+            if self.run_devappserver:
+                self.check_if_running(self.devappserver_container)
+            raise
 
         # Construct a pinger container and bind it to the application's network
         # stack. This will allow the pinger to attempt to connect to the
@@ -344,10 +354,13 @@ class ContainerSandbox(object):
         pinger_name = self.make_timestamped_name('pinger', self.cur_time)
         self.pinger_container = container.PingerContainer(self.dclient)
         self.pinger_container.create(name=pinger_name, image=PINGER)
-        get_logger().info('Starting container: {0}'.format(pinger_name))
 
-        self.pinger_container.start(
-            network_mode='container:{0}'.format(self.app_container.get_id()))
+        try:
+            self.pinger_container.start(
+                network_mode='container:{}'.format(self.app_container.get_id()))
+        except utils.AppstartAbort:
+            self.check_if_running(self.app_container)
+            raise
 
         self.wait_for_start()
         self.app_container.stream_logs()
@@ -355,6 +368,13 @@ class ContainerSandbox(object):
     def stop(self):
         """Remove containers to clean up the environment."""
         self.stop_and_remove_containers()
+
+    @staticmethod
+    def check_if_running(cont):
+        if not cont.running():
+            cont.stream_logs(stream=False)
+            raise utils.AppstartAbort('{0} stopped '
+                                      'prematurely'.format(cont.name))
 
     def __exit__(self, etype, value, traceback):
         self.stop()
@@ -380,7 +400,7 @@ class ContainerSandbox(object):
             utils.AppstartAbort: If the application server doesn't
                 start after timeout reach it on 8080.
         """
-        host = self.pinger_container.host
+        host = self.app_container.host
 
         get_logger().info('Waiting for application to listen on port 8080')
         attempt = 1
@@ -400,11 +420,10 @@ class ContainerSandbox(object):
             if attempt > self.timeout:
                 exit_loop_with_error('The application server timed out.')
 
-            if (self.run_devappserver and
-                not self.devappserver_container.running()):
-                # There's been a problem with devappserver, so dump its logs
-                self.devappserver_container.stream_logs(stream=False)
-                exit_loop_with_error('Devappserver stopped prematurely')
+            if self.run_devappserver:
+                self.check_if_running(self.devappserver_container)
+
+            self.check_if_running(self.app_container)
 
             if attempt % 4 == 0:
                 # \033[3D moves the cursor left 3 times. \033[K clears to the
@@ -423,8 +442,25 @@ class ContainerSandbox(object):
         get_logger().info('Your application is live. '
                           'Access it at: {0}:{1}'.format(host, str(self.port)))
 
+    @staticmethod
+    def app_directory_from_config(full_config_file_path):
+        """Get the application root directory based on the config file.
+
+        Args:
+            full_config_file_path: (basestring) The absolute path to a
+                config file.
+
+        Returns:
+            (basestring): The application's root directory.
+        """
+        conf_file_dir = os.path.dirname(full_config_file_path)
+        if full_config_file_path.endswith('.yaml'):
+            return conf_file_dir
+        else:
+            return os.path.dirname(conf_file_dir)
+
     def build_app_image(self):
-        """Build the app image from the Dockerfile in app_dir.
+        """Build the app image from the Dockerfile in the root directory.
 
         Returns:
             (basestring) The name of the new app image.
@@ -488,23 +524,6 @@ class ContainerSandbox(object):
         """
         return os.path.join(os.path.dirname(full_config_file_path),
                             'web.xml')
-
-    @staticmethod
-    def app_directory_from_config(full_config_file_path):
-        """Get the application root directory based on the config file.
-
-        Args:
-            full_config_file_path: (basestring) The absolute path to a
-                config file.
-
-        Returns:
-            (basestring): The application's root directory.
-        """
-        conf_file_dir = os.path.dirname(full_config_file_path)
-        if full_config_file_path.endswith('.yaml'):
-            return conf_file_dir
-        else:
-            return os.path.dirname(conf_file_dir)
 
     @staticmethod
     def make_timestamped_name(base, time_str):
