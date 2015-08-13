@@ -21,6 +21,7 @@
 import argparse
 from ..validator import contract
 
+
 def make_appstart_parser():
     """Make an argument parser to take in command line arguments.
 
@@ -52,13 +53,18 @@ def make_appstart_parser():
 
 
 def add_validate_args(parser):
+    """Adds command line arguments for the validator.
+
+    Args:
+       parser: the argparse.ArgumentParser to add the args to.
+    """
     parser.add_argument('--log_file',
                         default=None,
                         help='Logfile to collect validation results.')
     parser.add_argument('--threshold',
                         default='WARNING',
                         choices=[name for _, name in
-                                 contract.LEVEL_NAMES.iteritems()],
+                                 contract.LEVEL_NAMES_TO_NUMBERS.iteritems()],
                         help='The threshold at which validation should fail.')
     parser.add_argument('--tags',
                         nargs='*',
@@ -68,7 +74,6 @@ def add_validate_args(parser):
                         dest='verbose',
                         help='Whether to emit verbose output to stdout.')
     parser.set_defaults(verbose=False)
-
 
 
 def add_init_args(parser):

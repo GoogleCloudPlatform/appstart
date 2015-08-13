@@ -91,10 +91,11 @@ def main():
         tags = args.pop('tags')
         verbose = args.pop('verbose')
         success = False
+        utils.get_logger().setLevel(logging.INFO)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                validator = contract.ContractValidator(args, runtime_contract)
+                validator = contract.ContractValidator(runtime_contract, **args)
                 success = validator.validate(tags, threshold, logfile, verbose)
         except KeyboardInterrupt:
             utils.get_logger().info('Exiting')
@@ -104,7 +105,7 @@ def main():
         if success:
             sys.exit(0)
         sys.exit('Validation failed')
-    
+
     else:
         # This should not be reached
         sys.exit(1)

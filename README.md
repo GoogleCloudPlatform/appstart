@@ -123,3 +123,192 @@ class. This class constructs a sandbox consisting of an application container
 and a devappserver container, and it connects the two together. Upon exiting, it
 will stop these containers and remove them. It's quite resilient, so it won't
 litter the docker environment with old containers.
+
+
+# The Validator
+
+The validator is a framework built to validate whether or not a container
+conforms to the runtime contract. The runtime contract consists of a set of
+requirements imposed on it by the Google Cloud Platform. For instance, a
+container must respond to health checks on the `_ah/health` endpoint.
+
+The validator can test an application container to see if it meets the
+requirements of the runtime contract.
+
+## Default Invocation
+
+The validator can be invoked like this:
+
+    $ appstart validate <PATH_TO_CONFIG>
+
+The validator gets the container running in the same way as `appstart run`
+does. It then runs through a series of 'clauses', each of which test if
+the container is meeting a specific expectation. For example, a particular
+clause might send an HTTP request to the `_ah/health` endpoint to see if the
+application container properly responds to health checks. Another clause
+might check if the application is writing logs correctly.
+
+## Lifecycle points
+
+The validator evaluates clauses at very specific points of the container's
+lifecycle. The time period in which a clause is evaluated is called its
+'lifecycle point'. Lifecycle points include the following:
+
+  * `PRE_START`: the time before a start request is sent to the container
+  * `START`: the time during which a start request is sent to the container.
+    Note that only one clause can be defined for this lifecycle point.
+  * `POST_START`: the time after the container has received the start request.
+  * `STOP`: the time during which a stop request is sent to the container.
+    Note that only one clause can be defined for this lifecycle point.
+  * `POST_STOP`: the time after the container has received the stop request.
+
+## Error levels
+
+Each clause is marked with a specific error level. The error level denotes the
+severity of the error that would occur, should the clause fail to pass. Error
+levels include the following:
+
+  * FATAL: If the container fails a clause marked as FATAL, the container will
+    absolutely not work. FATAL errors include not listening on port 8080, not
+    responding properly to health checks, etc.
+
+  * WARNING: If the container fails a clause marked as WARNING,
+    it will possibly exhibit unexpected behavior. WARNING errors include
+    not writing logs in the correct format.
+
+  * UNUSED: If the container does not pass a clause marked as UNUSED, no real
+    error has occurred. It just means that the container isn't taking full
+    advantage of the runtime contract. UNUSED level errors include not writing
+    access or diagnostic logs. Other errors (namely WARNING errors) might be
+    dependent on UNUSED-level clauses. For instance, logging format is
+    contingent on the existence of logs in the proper location.
+
+By default, validation will fail if any clauses with error level WARNING or
+higher fail. This behavior can be changed by specifying a threshold. See
+`appstart validate --help` for more info.
+
+## Options
+
+The validator accepts all of the same options as `appstart run` does. In
+addition, the validator provides several options specific to its own
+functionality. To see all available options, run:
+
+    $ appstart validate --help
+
+## Custom Hook Clauses
+
+The validator provides functionality to write "hook clauses". These are
+user-supplied clauses generated at runtime.
+
+### Adding a hook clause
+
+To find hook clauses, the validator looks in the application's root for a
+directory by the name of `validator_hooks`. If such a directory is present,
+the validator recursively walks it, looking for any configuration files that
+end with `.conf.yaml`. For every such file found, the validator generates a
+hook clause, which will be evaluated along with all of the validator's default
+clauses. Note that for the validator to discover hook clauses, it must be run
+on the application's configuration file. In other words, hook clause will
+not fire if the following command is run:
+
+    $ appstart validate --image_name=<IMAGE_TO_RUN>
+
+### Writing a hook clause
+
+Specifying the behavior of a hook clause is very simple. As an example, let's
+walk through how this is done. Suppose we have an application with a very
+sophisticated `/foo` url endpoint. When we hit the `/foo` endpoint, we expect
+it to return a response whose body consists of the word, 'bar'.
+
+To write a hook clause to test this behavior, create the file
+`validator_hooks/test.py.conf.yaml` with the following content:
+
+    name: TestClause
+    title: Foo endpoint test
+    description: Test that /foo endpoint of the application returns 'bar'
+    lifecycle_point: POST_START
+
+Upon encountering our test.py.conf.yaml file, the validator will search for
+a script called `test.py` in the same directory. If it finds one, the validator
+will execute it at runtime, providing it with the following environment
+variables:
+
+  * `APP_CONTAINER_ID`: The application's Docker container ID. This can be used
+    to perform docker commands on the application.
+  * `APP_CONTAINER_HOST`: The host where the application container is running.
+  * `APP_CONTAINER_PORT`: The port where the application container is running.
+
+These environment variables can be used to test the container by sending it
+requests or even examining its internal state with docker. Since we're testing
+the `/foo` endpoint, our `validator_hooks/test.py` might look like this:
+
+    #!/usr/bin/python
+    import os
+    import requests
+
+    host = os.environ.get('APP_CONTAINER_HOST')
+    port = os.environ.get('APP_CONTAINER_PORT')
+
+    response = requests.get('http://{0}:{1}/foo'.format(host, port))
+    assert response.text == 'bar'
+
+Make sure that test.py is an executable. To do this, you can run:
+
+    $ chmod u+x test.py
+
+The hook clause will only be considered a failure if the executable returns a
+nonzero exit code. In the case of failure, the stdout and stderr of the
+executable will be reported in the test results.
+
+### Configuring Hook Clauses
+
+In our `.conf.yaml` file, we specified only a few key-value pairs. Those were
+the minimum parameters a hook clause needs. Of course, we can make our hook
+clause more configurable than that. Here's a list of configurable keys that can
+be put into a hook clause's `.conf.yaml` file:
+
+  * name: The name of the clause, used to identify the clause by other clauses.
+  * title: The title of the clause, displayed in test results
+  * description: A brief description of the thing the clause is validating. This
+    description is also displayed in test results.
+  * lifecycle\_point: The point of the container's lifecycle in which the hook
+    clause should be executed.
+  * error\_level: The severity of the error that would occur, should the clause
+    fail. Defaults to `UNUSED`.
+  * tags: A list of string tags to mark the hook clause with. The validator can
+    be invoked with the `--tags' option, which specifies a subset of clauses to
+    be evaluated.
+  * command: A string representing the command used to "evaluate" the hook clause.
+    By default, the validator will search for an executable of the same name,
+    less the `.conf.yaml` suffix. The hook clause is considered a success if it
+    returns with an exit code of 0.
+  * dependencies: A list of clauses that must have passed before the hook clause
+    is evaluated. If any of the hook clauses dependencies have failed, the hook
+    clause will be skipped.
+  * dependants: A list of clauses whose evaluation should be contingent on the
+    success of the hook clause. If the hook clause fails, none of its dependants
+    will run.
+  * before: A list of clauses that should be evaluated BEFORE the hook clause.
+    Similar to dependencies, but the hook clause will run even if any of its
+    "before" clauses have failed.
+  * after: A list of clauses that should be evaluated AFTER the hook clause.
+
+To specify a list of clauses for the last four keys, simply supply their names
+as they appear in the "name" key. For example, here's our old `.conf.yaml` file
+with a little more configuration:
+
+    name: TestClause
+    title: Foo endpoint test
+    description: Test that /foo endpoint of the application returns 'bar'
+    lifecycle_point: POST_START
+    error_level: WARNING
+    tags:
+        - test
+        - foo
+        - baz
+    dependencies:
+        - StartClause
+        - HealthChecksEnabledClause
+    after:
+        - HealthCheckClause
+    command: /path/to/some/executable

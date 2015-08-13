@@ -148,8 +148,8 @@ class Container(object):
                     logs = self._dclient.logs(container=self._container_id,
                                               stream=True)
                     for line in logs:
-                        utils.get_logger().info('{0}: {1}'.format(name,
-                                                                  line.strip()))
+                        utils.get_logger().debug('{0}: {1}'.format(
+                            name, line.strip()))
 
                 # In the case of a timeout, try to start collecting logs again.
                 except requests.exceptions.ReadTimeout:
@@ -171,7 +171,7 @@ class Container(object):
             logs = self._dclient.logs(container=self._container_id,
                                       stream=False)
             for line in logs.split('\n'):
-                            utils.get_logger().info(line.strip())
+                utils.get_logger().debug(line.strip())
 
     def running(self):
         """Check if the container is still running.

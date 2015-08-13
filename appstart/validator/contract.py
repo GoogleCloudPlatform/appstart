@@ -12,22 +12,57 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""This file contains the classes that form a framework for validation.
+"""This file contains the classes that form the notion of a contract.
 
-The validation framework is based on the python unittest framework.
+The information flow is as follows:
+
+1) A contract is specified as a series of ContractClauses*. A clause is
+a functionally independent condition that a container is supposed to satisfy.
+These clauses can specify ordering and dependencies on other ContractClauses.
+
+2) The contract is presented to the ContractValidator. The ContractValidator
+will generate "hook clauses"** and throw them into the mix. Then, the
+ContractValidator will arrange clauses in the correct chronological order and
+check that there are no dependency loops.
+
+3) The ContractValidator runs the clauses using the ContractTestRunner. The
+test runner is based on python's unittest.TextTestRunner.
+
+4) The ContractTestRunner collects the results of each clause in a
+ContractTestResult. The ContractTestResult simultaneously collects results and
+reports. At the end of validation, the ContractTestRunner makes a cumulative,
+more detailed report, using the ContractTestResult.
+
+* ContractClauses must define an 'evaluate_clause' method, which verifies the
+actual thing that the clause is supposed to check. For instance, a clause that
+checks if the container responds favorably on _ah/health must send an HTTP
+request to the container's _ah/health endpoint in the evaluate_clause method.
+
+** Hook clauses are custom scripts defined by the user. Hook clauses are added
+at runtime. See README.md for more info.
 """
+
+# TODO: see if we can simplify the way that dependencies and lifecycle points
+# work.
 
 # This file conforms to the external style guide.
 # see: https://www.python.org/dev/peps/pep-0008/.
 # pylint: disable=bad-indentation, g-bad-import-order
 
+import copy
 import inspect
 import logging
+import os
+import subprocess
+import tempfile
 import time
 import unittest
+import yaml
 
 from ..sandbox import container_sandbox
+from .. import utils
 
+import errors
 import color_logging
 
 ################################################################################
@@ -51,9 +86,12 @@ import color_logging
 FATAL = 30
 WARNING = 20
 UNUSED = 10
-LEVEL_NAMES = {FATAL: 'FATAL',
-               WARNING: 'WARNING',
-               UNUSED: 'UNUSED'}
+LEVEL_NUMBERS_TO_NAMES = {FATAL: 'FATAL',
+                          WARNING: 'WARNING',
+                          UNUSED: 'UNUSED'}
+
+LEVEL_NAMES_TO_NUMBERS = {name: val for val, name
+                          in LEVEL_NUMBERS_TO_NAMES.iteritems()}
 
 # Lifecycle timeline
 POST_STOP = 50
@@ -62,17 +100,52 @@ POST_START = 30
 START = 20
 PRE_START = 10
 
-# Tests will be executed in the order of lifecyle points.
+# Tests will be executed in the order of lifecycle points.
 _TIMELINE = [PRE_START, START, POST_START, STOP, POST_STOP]
 
 # Singular points are lifecycle points that allow only one test.
 _SINGULAR_POINTS = [START, STOP]
 
-_TIMELINE_NAMES = {POST_STOP: 'Post Stop',
-                   STOP: 'Stop',
-                   POST_START: 'Post Start',
-                   START: 'Start',
-                   PRE_START: 'Pre Start'}
+_TIMELINE_NUMBERS_TO_NAMES = {POST_STOP: 'Post Stop',
+                              STOP: 'Stop',
+                              POST_START: 'Post Start',
+                              START: 'Start',
+                              PRE_START: 'Pre Start'}
+
+_TIMELINE_NAMES_TO_NUMBERS = {name.upper().replace(' ', '_'): val for val, name
+                              in _TIMELINE_NUMBERS_TO_NAMES.iteritems()}
+
+
+# Hook config extension. This determines what the extension of config files for
+# hooks should be.
+_HOOK_CONF_EXTENSION = '.conf.yaml'
+
+# Name of the directory where validator is supposed to find hook tests
+HOOK_DIRECTORY = 'validator_tests'
+
+# Attributes for a ContractClause
+_REQUIRED_ATTRS = ['lifecycle_point', 'title', 'description']
+
+_DEFAULT_ATTRS = {'dependencies': set(),
+                  'dependants': set(),
+                  'before': set(),
+                  'after': set(),
+                  'tags': set(),
+                  'error_level': UNUSED,
+                  '_unresolved_before': set(),
+                  '_unresolved_after': set(),
+                  '_unresolved_dependants': set(),
+                  '_unresolved_dependencies': set(),
+                  '_conf_file': None}
+
+# Keys for a yaml test configuration
+_REQUIRED_YAML_ATTRS = ['name'] + _REQUIRED_ATTRS
+_DEFAULT_YAML_ATTRS = {'dependencies': [],
+                       'dependants': [],
+                       'before': [],
+                       'after': [],
+                       'tags': [],
+                       'error_level': 'UNUSED'}
 
 
 class ContractTestResult(unittest.TextTestResult):
@@ -87,26 +160,22 @@ class ContractTestResult(unittest.TextTestResult):
     SKIP = 1
     PASS = 0
 
-    def __init__(self,
-                 success_set,
-                 threshold,
-                 *test_result_args,
-                 **test_result_kwargs):
+    def __init__(self, success_set, threshold, *result_args, **result_kwargs):
         """Initializer for ContractTestResult.
 
         Args:
             success_set: (set) A set of test classes that have succeeded thus
                 far. Upon success, the class should be added to this set.
-            threshold: (int) One of the error levels in LEVEL_NAMES.keys().
-                Validation will result in failure if and only if a
-                test with an error_level greater than threshold fails.
-            *test_result_args: (list) Arguments to be passed to the
+            threshold: (int) One of the error levels in
+                LEVEL_NUMBERS_TO_NAMES.keys(). Validation will result in
+                failure if and only if a test with an error_level greater than
+                threshold fails.
+            *result_args: (list) Arguments to be passed to the
                 constructor for TextTestResult.
-            **test_result_kwargs: (dict) Keyword arguments to be passed to the
+            **result_kwargs: (dict) Keyword arguments to be passed to the
                 constructor for TextTestResult.
         """
-        super(ContractTestResult, self).__init__(*test_result_args,
-                                                 **test_result_kwargs)
+        super(ContractTestResult, self).__init__(*result_args, **result_kwargs)
 
         # Assume that the tests will be successful
         self.success = True
@@ -229,8 +298,9 @@ class ContractTestResult(unittest.TextTestResult):
         if short:
             prefix = '[{0: >6}]'.format(outcome_type)
         else:
-            prefix = '[{0} ({1})]'.format(outcome_type,
-                                          LEVEL_NAMES.get(test.error_level))
+            prefix = '[{0} ({1})]'.format(
+                outcome_type,
+                LEVEL_NUMBERS_TO_NAMES.get(test.error_level))
 
         if color:
             prefix = '%({0})s{1}%(end)s'.format(color, prefix)
@@ -256,17 +326,27 @@ class ContractTestResult(unittest.TextTestResult):
                 lvl = logging.INFO
             message = self.__make_message(test, self.FAIL, short=False)
             self.stream.writeln(message, lvl=lvl)
-            self.stream.writeln(test.failure_message, lvl=lvl)
+
+            # Sanitize the input to the logger by replacing % with %%.
+            # This is necessary because the custom formatter operates on
+            # % placeholders. Since this place deals with external input,
+            # make sure that there are no stray %'s.
+            self.stream.writeln(test.failure_message.replace('%', '%%'),
+                                lvl=lvl)
             self.stream.writeln(lvl=lvl)
 
         for test, err in self.errors:
             message = self.__make_message(test, self.ERROR, short=False)
             self.stream.writeln(message)
-            self.stream.writeln(err)
+
+            # Same sanitization as above.
+            self.stream.writeln(err.replace('%', '%%'))
 
     def print_skips(self):
-        self.stream.writeln(' %(bold)s Skip Details %(end)s '.center(100, '-'),
-                            lvl=logging.DEBUG)
+        if self.skipped:
+            self.stream.writeln(
+                ' %(bold)s Skip Details %(end)s '.center(100, '-'),
+                lvl=logging.DEBUG)
         for test, reason in self.skipped:
             message = self.__make_message(test, self.SKIP, short=False)
             self.stream.writeln(message, lvl=logging.DEBUG)
@@ -290,9 +370,9 @@ class ContractTestRunner(unittest.TextTestRunner):
             success_set: (set) An empty set. Test classes that have succeeded
                 should be added to this set.
             threshold: (int) One of the error levels as specified above
-                in the LEVEL_NAMES global var. Validation will result in
-                failure if and only if a test with an error_level greater
-                than threshold fails.
+                in the LEVEL_NUMBERS_TO_NAMES global var. Validation will
+                result in failure if and only if a test with an error_level
+                greater than threshold fails.
             logfile: (basestring) The logfile to append messages to.
             verbose_printing: (bool) Whether or not to create a verbose
                 LoggingStream (one that prints to console verbosely).
@@ -363,7 +443,8 @@ class ContractTestRunner(unittest.TextTestRunner):
             infos.append('PASSED=%d' % len(result.success_list))
         for level in result.error_stats.keys():
             infos.append('%s=%i' %
-                         (LEVEL_NAMES[level], result.error_stats[level]))
+                         (LEVEL_NUMBERS_TO_NAMES[level],
+                          result.error_stats[level]))
         if result.skipped:
             infos.append('SKIPPED=%d' % len(result.skipped))
 
@@ -379,34 +460,124 @@ class ContractClause(unittest.TestCase):
 
     Each clause represents a functionally independent condition
     that the container is supposed to fulfill.
+
+    Clauses should define the following class variables:
+
+    Optional:
+        error_level: (int) A number corresponding to an
+            error level in LEVEL_NUMBERS_TO_NAMES. Defaults to UNUSED. This
+            indicates the severity of the error that would occur in production,
+            should the container not fulfill the clause. Clauses that assert
+            conditions that are essential to the operation of a container
+            should have a higher level than clauses that assert trivial
+            conditions.
+        tags: {[basestring, ...]} Tags are a set of string identifiers
+            associated with the ContractClause. They allow a subset of
+            ContractClauses from a module to be run; the runner of validator
+            can pass a list of tags, and the ContractClause will only be
+            evaluated if one of its tags appears in the list. By default, a
+            clause will be tagged with its own class name in addition to any
+            tags specified.
+        dependencies: {[class, ...]} A set of clause classes that inherit
+            from ContractClause. A clause will be evaluated if and only
+            if the clauses in this set pass.
+        before: {[class, ...]} A set of clauses (ContractClause classes)
+            to evaluate BEFORE the current clause.
+        dependants: {[class, ...]} A set of classes that inherit from
+            ContractClause. This clause will be added to the dependency sets
+            of all dependants. In other words, the dependants are to depend on
+            this clause.
+        after: {[class, ...]} A set of clauses (ContractClause classes)
+            to evaluate AFTER the current clause.
+
+        The point of 'after' and 'dependants' is to allow hook clauses to
+        place themselves before a default clause of the runtime contract.
+        However, the code for the default clauses is not to be modified.
+        Implementing 'dependants' and 'afters' is a good workaround.
+
+    Required:
+        lifecycle_point: (int) A point corresponding to a time period
+            in _TIMELINE. This determines in which time period the clause
+            will be evaluated.
+        title: (basestring) The title of the clause, displayed in validation
+            results.
+        description: (basestring) The description, elaborating what the clause
+            is validating. This description is also presented in the validation
+            results.
     """
 
-    # lifecyle_point: (int) A point corresponding to a time period
-    #     in _TIMELINE. This determines in which time period the clause
-    #     will be evaluated.
-    # error_level: (int) A number corresponding to an
-    #     error level in LEVEL_NAMES. This indicates the severity of
-    #     the error that would occur in production, should the container
-    #     not fulfill the clause. Clauses that assert conditions
-    #     that are essential to the operation of a container should
-    #     have a higher level than clauses that assert trivial
-    #     conditions.
-    # tags: ([basestring, ...]) Tags are a list of string identifiers
-    #     associated with the ContractClause. They allow a subset of
-    #     ContractClauses from a module to be run; the runner of validator
-    #     can pass a list of tags, and the ContractClause will only be
-    #     evaluated if one of its tags appears in the list. By default,
-    #     a clause will be tagged with its own class name.
-    # dependencies: ([class, ...]) A list of classes that inherit
-    #     from ContractClause. A clause will be evaluated if and only
-    #     if the clauses in this list pass.
+    class __metaclass__(type):  # pylint: disable=invalid-name
+        """Checks attributes of any class derived from ContractClause.
 
-    lifecyle_point = None
-    error_level = UNUSED
-    dependencies = []
-    description = None
-    tags = None
-    title = None
+        The metaclass is invoked when the class is defined, so this is a
+        great way to check very early that the clause is valid.
+        """
+
+        def __init__(cls, name, bases, dct):
+            """Ensure cls has the required attributes, and set the default ones.
+
+            Args:
+                name: (basestring) The name of the class being initialized.
+                bases: ([class, ...]) A list of classes that cls inherits from.
+                dct: (dict) A dictionary mapping names->attributes/methods of
+                    cls.
+
+            Raises:
+                KeyError: If lifecycle_point is not a valid lifecycle point or
+                    if error_level is not a valid error level.
+                AttributeError: If the clause does not have the attributes
+                    enumerated in _REQUIRED_ATTRIBUTES.
+            """
+            type.__init__(cls, name, bases, dct)
+
+            # String by which to identify the clause, for the purpose of
+            # error reporting.
+            identifier = getattr(cls, '_conf_file', name)
+
+            def set_default_attr(obj, attr, value):
+                if not hasattr(obj, attr):
+                    # Copy so that we don't use the same sets for all of
+                    # the clauses.
+                    setattr(obj, attr, copy.copy(value))
+
+            def ensure_proper_type(obj, attr, attr_type):
+                if type(getattr(obj, attr)) != attr_type:
+                    raise errors.ContractAttributeError(
+                        '{0}: {1} should be of type '
+                        '"{2}"'.format(identifier, attr, attr_type))
+
+            def assert_attrs_exist(cls, attrs):
+                for attr in attrs:
+                    if not hasattr(cls, attr):
+                        raise errors.ContractAttributeError(
+                            '{0} must have attribute: {1}'.format(identifier,
+                                                                  attr))
+
+            # These defaults should only be set if the class being
+            # initialized is not a ContractClause. Same goes for asserting
+            # that the required attributes exist.
+            if name != 'ContractClause':
+                for attr, val in _DEFAULT_ATTRS.iteritems():
+                    set_default_attr(cls, attr, val)
+                    if val is not None:
+                        ensure_proper_type(cls, attr, type(val))
+
+                assert_attrs_exist(cls, _REQUIRED_ATTRS)
+
+                # Ensure a valid lifecycle point.
+                if cls.lifecycle_point not in _TIMELINE:
+                    raise errors.ContractAttributeError(
+                        '{0} does not have a valid lifecycle '
+                        'point'.format(identifier))
+
+                # Ensure a valid error_level.
+                if cls.error_level not in LEVEL_NUMBERS_TO_NAMES.keys():
+                    raise errors.ContractAttributeError(
+                        '{0} does not have a valid error '
+                        'level'.format(identifier))
+
+                # Tag the clause with its own name.
+                cls.tags.add(name)
 
     def __init__(self, sandbox):
         """Initializer for ContractClause.
@@ -414,39 +585,11 @@ class ContractClause(unittest.TestCase):
         Args:
             sandbox: (sandbox.container_sandbox.ContainerSandbox)
                 A sandbox that manages the container to be tested.
-        Raises:
-            KeyError: If lifecyle_point is not a valid lifecyle point or
-                if error_level is not a valid error level.
-            AttributeError: If the clause does not have the attributes
-                enumerated in _REQUIRED_ATTRIBUTES.
-            ValueError: If the clause's 'tags' attribute is not a list.
         """
-        for attr in ['lifecyle_point', 'title', 'description']:
-            if not getattr(self, attr, None):
-                raise AttributeError('{0} must have attribute: '
-                                     '{1}'.format(self.__class__.__name__,
-                                                  attr))
-
-        # Ensure a valid lifecycle_point.
-        if self.lifecyle_point not in _TIMELINE:
-            raise KeyError('{0} does not have a valid lifecycle '
-                           'point.'.format(self.__class__.__name__))
-
-        # Ensure a valid error_level
-        if self.error_level not in LEVEL_NAMES.keys():
-            raise KeyError('{0} does not have a valid error '
-                           'level.'.format(self.__class__.__name__))
-
-        self.tags = self.tags or []
-        if not isinstance(self.tags, list):
-            raise ValueError('"tags" attribute must be a list')
-
-        self.tags.append(self.__class__.__name__)
 
         # Register the function 'run_test' to be executed as the
         # test driver.
         super(ContractClause, self).__init__('run_test')
-
         self.__sandbox = sandbox
 
     def shortDescription(self):
@@ -470,14 +613,14 @@ class ContractClause(unittest.TestCase):
 class ContractValidator(object):
     """Coordinates the evaluation of multiple contract clauses."""
 
-    def __init__(self, sandbox_kwargs, contract_module):
+    def __init__(self, contract_module, **sandbox_kwargs):
         """Initializer for ContractValidator.
 
         Args:
-            sandbox_kwargs: (dict) Keyword args for the ContainerSandbox.
             contract_module: (module) A module that contains classes that
                 inherit from ContractClause. These classes will
                 be used to make the contract.
+            **sandbox_kwargs: (dict) Keyword args for the ContainerSandbox.
         """
         self.contract = {}
         self.sandbox = container_sandbox.ContainerSandbox(
@@ -489,17 +632,111 @@ class ContractValidator(object):
         # Set of clauses that have succeeded.
         self.__success_set = set()
 
-        self.__construct_contract(contract_module)
-        self._tags = []
+        # Dict of clauses to add to the contract.
+        self._clause_dict = {c.__name__: c
+                             for c in self._extract_clauses(contract_module)}
 
-    def __construct_contract(self, module):
-        """Recursively add clauses to the contract."""
+        # Make the "hook" clauses and add them to the clause list. See
+        # README.md to find out more about hook clauses.
+        for hook in self._make_hook_clauses():
+            if hook.__name__ in self._clause_dict:
+                raise utils.AppstartAbort('Cannot use same clause name twice: '
+                                          '{0}'.format(hook.__name__))
+            self._clause_dict[hook.__name__] = hook
+
+        # Normalize the dependency structure of the clauses
+        self._normalize_clause_dict(self._clause_dict)
+
+        # Construct the contract. This involves a depth-first traversal of
+        # the clauses in self._clause_list.
+        self._construct_contract()
+
+        # Tags identifying the clauses to be validated.
+        self._tags = set()
+
+    @staticmethod
+    def _extract_clauses(module):
+        clause_list = []
 
         # Iterate over all of the module's attributes.
         for attr in [module.__dict__.get(name) for name in dir(module)]:
             # Add the attribute to the contract if it's a ContractClause
             if inspect.isclass(attr) and issubclass(attr, ContractClause):
-                self.__add_clause(attr, set(), [])
+                clause_list.append(attr)
+
+        return clause_list
+
+    @staticmethod
+    def _normalize_clause_dict(clause_dict):
+        """Resolve dependencies and set up chronology of clauses.
+
+        Args:
+            clause_dict: ({basestring: class}) A dictionary mapping clause
+                names to their respective classes.
+
+        Resolving dependencies:
+        At the time this function is called, clauses may have lists of
+        _unresolved_dependencies, _unresolved_dependants, etc. These are just
+        lists of strings that are supposed to correspond to other clauses. This
+        method resolves the clause names to *actual* clauses. The reason that
+        this resolution is necessary is that hook clauses might depend on other
+        clauses. These dependencies cannot be resolved when each hook clause is
+        added, since a hook clause might depend on another hook clause that has
+        not yet been discovered. Therefore, initially, dependencies get
+        recorded as string names and are later resolved to classes (via this
+        method).
+
+        Arranging chronology:
+        This method arranges dependants to set up a depth first traversal
+        of the dependency graph. That is, each clause may have a list of
+        dependents - other clauses that must depend on the first clause.
+        For instance, suppose clause X has clauses A, B and C as dependents.
+        The easiest way to deal with this is to add clause X to A, B and C's
+        dependencies before beginning the traversal.
+        """
+        for unused_name, clause in clause_dict.iteritems():
+            def _resolve_name(name):
+                try:
+                    # clause_dict maps names to clauses.
+                    return clause_dict[name]
+                except KeyError:
+                    #  pylint: disable=cell-var-from-loop
+                    raise utils.AppstartAbort(
+                        'In {0}: could not resolve clause '
+                        '{1}'.format(clause._conf_file, name))
+                    #  pylint: enable=cell-var-from-loop
+
+            # pylint: disable=unused-argument
+            def resolve(resolved, unresolved):
+                # For each item in unresolved, resolve it. Then union the
+                # set of resolved items with the results.
+                resolved |= set(map(_resolve_name, unresolved))
+
+            # pylint: enable=unused-argument
+
+            # Perform the actual resolution.  The reason we have to specify
+            # "afters" is because users can add custom clauses to the
+            # runtime contract. The developer should really have a way to
+            # specify that a default clause in the runtime contract should
+            # depend on their custom clause without having to change this code.
+            resolve(clause.after, clause._unresolved_after)
+            resolve(clause.before, clause._unresolved_before)
+            resolve(clause.dependants, clause._unresolved_dependants)
+            resolve(clause.dependencies, clause._unresolved_dependencies)
+
+            # If X has dependant A, add X to A's dependencies.
+            for dependant_clause in clause.dependants:
+                if clause not in dependant_clause.dependencies:
+                    dependant_clause.dependencies.add(clause)
+
+            for after_clause in clause.after:
+                if clause not in after_clause.before:
+                    after_clause.before.add(clause)
+
+    def _construct_contract(self):
+        """Recursively add clauses to the contract."""
+        for unused_name, clause in self._clause_dict.iteritems():
+            self._add_clause(clause, set(), [])
 
     def display_loop(self, stack, cls):
         """Display the loop in the dependency graph.
@@ -525,7 +762,7 @@ class ContractValidator(object):
         msg += cls.__name__
         return msg
 
-    def __add_clause(self, clause_class, visited_classes, recursion_stack):
+    def _add_clause(self, clause_class, visited_classes, recursion_stack):
         """Add a clause to the validator.
 
         Ensure that no dependency cycles occur.
@@ -541,10 +778,11 @@ class ContractValidator(object):
                 a loop is even found.
 
         Raises:
-            RuntimeError: If a circular dependency is detected.
-            ValueError: If a clause has an earlier lifecyle_point than
+            errors.CircularDepencencyError: If a circular dependency is
+                detected.
+            ValueError: If a clause has an earlier lifecycle_point than
                 another clause that it depends on OR if more than one
-                clause with a lifecyle_point in _SINGULAR_POINTS is
+                clause with a lifecycle_point in _SINGULAR_POINTS is
                 added.
         """
         # Base case: the clause has been added already.
@@ -558,30 +796,30 @@ class ContractValidator(object):
             # In the case of a loop, print where it occurs so that the person
             # writing the contract knows to get rid of it.
             message = self.display_loop(recursion_stack, clause_class)
-            raise RuntimeError('Circular dependency '
-                               'was detected: {0}'.format(message))
+            raise errors.CircularDependencyError(
+                'Circular dependency was detected: {0}'.format(message))
 
         # Mark that we've visited the clause already. If we come back to
         # the same clause later, we'll know that a cycle has occured.
         visited_classes.add(clause_class)
         recursion_stack.append(clause_class)
 
-        for dep in clause_class.dependencies:
+        for dep in clause_class.dependencies | clause_class.before:
             # A clause must have either the same lifecycle point or a later one
             # than all of the clauses it depends on.
-            if dep.lifecyle_point > clause_class.lifecyle_point:
-                raise ValueError('{0}->{1}: Clause cannot have earlier '
-                                 'lifecyle_point than a clause it depends '
-                                 'on.'.format(clause_class.__name__,
-                                              dep.__name__))
+            if dep.lifecycle_point > clause_class.lifecycle_point:
+                raise errors.CircularDependencyError(
+                    '{0}->{1}: Clause cannot have earlier lifecycle_point '
+                    'than a clause that must run before '
+                    'it.'.format(clause_class.__name__, dep.__name__))
 
-            # Recur on all clauses that this clause depends on. We want to add
+            # Recurse on all clauses that this clause depends on. We want to add
             # these clauses to the contract before we add the current one.
             # That's because the clauses upon which the current clause depends
             # should be evaluated first.
-            self.__add_clause(dep, visited_classes, recursion_stack)
+            self._add_clause(dep, visited_classes, recursion_stack)
 
-        # At this point, we've finished recurring and need to prepare to return
+        # At this point, we've finished recursion and need to prepare to return
         # and take a step backward in our DFS traversal. Therefore, remove the
         # current clause from the set of visited clauses and pop the stack.
         visited_classes.remove(clause_class)
@@ -592,30 +830,187 @@ class ContractValidator(object):
 
         # Add the clause to the appropriate list. Note that the list may not yet
         # exist.
-        self.contract.setdefault(clause.lifecyle_point, [])
-        clause_list = self.contract.get(clause.lifecyle_point)
+        self.contract.setdefault(clause.lifecycle_point, [])
+        clause_list = self.contract.get(clause.lifecycle_point)
 
         # Singular points are those for which only ONE clause can be present.
-        if clause.lifecyle_point in _SINGULAR_POINTS and len(clause_list):
+        if clause.lifecycle_point in _SINGULAR_POINTS and len(clause_list):
             raise ValueError(
                 'Cannot add more than one "{0}" '
-                'clause'.format(_TIMELINE_NAMES[clause.lifecyle_point]))
+                'clause'.format(
+                    _TIMELINE_NUMBERS_TO_NAMES[clause.lifecycle_point]))
 
-        clause.evaluate_clause = self.patch_clause(clause,
-                                                   clause.evaluate_clause)
+        clause.evaluate_clause = self._dependency_and_tag_wrapper(
+            clause, clause.evaluate_clause)
         clause_list.append(clause)
         self.__added_clauses.add(clause_class)
 
-    def patch_clause(self, clause, func):
+    def _make_hook_clauses(self):
+        """Construct the hook clauses to add to the contract.
+
+        Hook clauses are clauses created on the fly to incorporated custom
+        tests defined by the user in the form of scripts. See README.md for
+        more info on hook clauses.
+
+        Returns:
+            ([class, ...]) A list of ContractClause classes corresponding to
+                each hook clause.
+        """
+        # Get the directory where the hook tests should be.
+        hook_test_dir = os.path.join(self.sandbox.app_dir, HOOK_DIRECTORY)
+
+        # If the path doesn't exist or it's not a directory, return early.
+        if not os.path.isdir(hook_test_dir):
+            return []
+
+        hook_clauses = []
+
+        # Walk the directory and for each configuration file, make a hook
+        # clause.
+        for root, _, files in os.walk(hook_test_dir):
+            for yaml_file in [os.path.join(root, f) for f in files
+                              if f.endswith(_HOOK_CONF_EXTENSION)]:
+                hook_clauses.append(self._make_hook_clause_for_yaml(yaml_file))
+
+        return hook_clauses
+
+    def _make_hook_clause_for_yaml(self, yaml_file):
+        """Make hook clauses for all the scripts inside a directory.
+
+        Args:
+            yaml_file: (basestring) Path to the config file from which to make
+                a hook clause.
+
+        Returns:
+            ([class, ...]) A list of ContractClause classes corresponding to
+                each hook clause. Note that one hook clause is made per
+                executable script.
+        """
+        hook_config = yaml.load(open(yaml_file))
+
+        def verify_has_key_and_set_defaults(key):
+            """Verify that the key exists or set a default if possible."""
+            if key in _DEFAULT_YAML_ATTRS:
+
+                # Only set the default value if the key is not not in the
+                # configuration
+                hook_config.setdefault(key, copy.copy(_DEFAULT_YAML_ATTRS[key]))
+
+            # If the key wasn't optional, complain.
+            elif key not in hook_config:
+                raise utils.AppstartAbort('{0} has no attribute '
+                                          '{1}'.format(yaml_file, key))
+
+        # Get the keys whose existence we need to verify
+        keys = _DEFAULT_YAML_ATTRS.keys() + _REQUIRED_YAML_ATTRS
+
+        if 'command' not in hook_config:
+            # The default executable is presumed to be a file of the same
+            # name, less the hook configuration extension.
+            executable = yaml_file[:-len(_HOOK_CONF_EXTENSION)]
+
+            # Bail out if we can't find the file.
+            if not os.path.exists(executable):
+                raise utils.AppstartAbort('Default executable for {0} not '
+                                          'found'.format(yaml_file))
+
+            if not os.path.isfile(executable):
+                raise utils.AppstartAbort('Default executable for {0} must be '
+                                          'a file: {0}'.format(yaml_file))
+
+            # If we can find the file but it's not executable, bail out.
+            if not os.access(executable, os.X_OK):
+                raise utils.AppstartAbort('Default executable for {0} is not '
+                                          'executable'.format(yaml_file))
+            hook_config['command'] = executable
+
+        # Verify the existence of keys and set defaults if possible.
+        map(verify_has_key_and_set_defaults, keys)
+        sandbox = self.sandbox
+
+        # The new hook clause
+        class NewClause(ContractClause):
+            title = hook_config['title']
+            description = hook_config['description']
+            error_level = LEVEL_NAMES_TO_NUMBERS.get(
+                hook_config['error_level'])
+            tags = set(hook_config['tags'])
+            lifecycle_point = _TIMELINE_NAMES_TO_NUMBERS.get(
+                hook_config['lifecycle_point'])
+
+            # Currently, dependencies, dependants, before, and after are
+            # unresolved. That is, they refer to clause names, not classes. We
+            # cannot resolve them to classes yet, because we need to finish
+            # creating all of the clauses. (Imagine the scenario where custom
+            # hook x wants to run before custom hook y, but y has not yet been
+            # created.
+            _unresolved_dependencies = set(hook_config['dependencies'])
+            _unresolved_dependants = set(hook_config['dependants'])
+            _unresolved_before = set(hook_config['before'])
+            _unresolved_after = set(hook_config['after'])
+            _conf_file = yaml_file
+
+            def evaluate_clause(self, app_container):
+                env = dict(os.environ)
+
+                # These environment variables will give the hook access
+                # to the necessary parameters.
+                env['APP_CONTAINER_ID'] = app_container.get_id()
+                env['APP_CONTAINER_HOST'] = app_container.host
+                env['APP_CONTAINER_PORT'] = str(sandbox.port)
+
+                stdout = tempfile.TemporaryFile()
+
+                # Run the command and assert a 0 exit code.
+                return_code = subprocess.Popen(
+                    args=hook_config['command'],
+                    env=env,
+                    stdout=stdout,
+                    stderr=subprocess.STDOUT,
+                    shell=True).wait()
+
+                stdout.seek(0)
+
+                self.assertEqual(return_code,
+                                 0,
+                                 'Return code was {0}. Printing '
+                                 'stdout:\n{1}'.format(return_code,
+                                                       stdout.read()))
+
+        NewClause.__name__ = hook_config['name']
+
+        return NewClause
+
+    def _dependency_and_tag_wrapper(self, clause, func):
+        """Wrap func to achieve contingency on tags and dependencies.
+
+        This will cause func to run only if dependency conditions and
+        tag conditions have been met. In cases where the clause's dependencies
+        have failed, or the clause does not have the necessary tags to be run,
+        the wrapper will raise a SkipTest.
+
+        Args:
+            clause: (ContractClause) The clause whose function to wrap.
+            func: (callable) The actual function to patch.
+
+        Returns:
+            (callable) The wrapper around func.
+        """
         def _wrapper(*args, **kwargs):
+
+            # Check the dependencies at runtime. If any haven't passed, skip.
             for dependency_class in clause.dependencies:
                 if dependency_class not in self.__success_set:
                     raise unittest.SkipTest(
                         '"{0}" did not pass'.format(dependency_class.title))
+
+            # Only check against tags if self._tags is not an empty set.
             if self._tags:
                 for tag in clause.tags:
+                    # If a single tags matches, apply func.
                     if tag in self._tags:
                         return func(*args, **kwargs)
+
                 raise unittest.SkipTest('Clause is tagged with: {0}. '
                                         'Currently running: '
                                         '{1}'.format(clause.tags, self._tags))
@@ -624,7 +1019,11 @@ class ContractValidator(object):
 
         return _wrapper
 
-    def validate(self, tags, threshold='WARNING', logfile=None, verbose=False):
+    def validate(self,
+                 tags=None,
+                 threshold='WARNING',
+                 logfile=None,
+                 verbose=False):
         """Evaluate all clauses.
 
         Args:
@@ -632,9 +1031,9 @@ class ContractValidator(object):
                 desired tests to run. A clause will only be evaluated if
                 it contains a tag that appears in this list.
             threshold: (int) One of the error levels as specified above
-                in the LEVEL_NAMES global var. Validation will result in
-                failure if and only if a test with an error_level greater
-                than threshold fails.
+                in the LEVEL_NUMBERS_TO_NAMES global var. Validation will
+                result in failure if and only if a test with an error_level
+                greater than threshold fails.
             logfile: (basestring or None) The name of the log file to append
                 to.
             verbose: (bool) Whether or not to run tests verbosely. If False,
@@ -645,11 +1044,10 @@ class ContractValidator(object):
         Returns:
             (bool) True if validation was successful. False otherwise.
         """
-        self._tags.extend(tags or [])
-        for level, name in LEVEL_NAMES.iteritems():
-            if name == threshold:
-                threshold = level
-                break
+        self._tags.update(tags or set())
+
+        # The threshold comes in as a string. Convert it to a numerical value.
+        threshold = LEVEL_NAMES_TO_NUMBERS[threshold]
 
         test_runner = ContractTestRunner(self.__success_set,
                                          threshold=threshold,
@@ -661,7 +1059,7 @@ class ContractValidator(object):
             for point in _TIMELINE:
                 if point not in self.contract: continue
                 suite = unittest.TestSuite(self.contract.get(point))
-                res = test_runner.run(suite, _TIMELINE_NAMES[point])
+                res = test_runner.run(suite, _TIMELINE_NUMBERS_TO_NAMES[point])
                 validation_passed = validation_passed and res.success
         finally:
             self.sandbox.stop()

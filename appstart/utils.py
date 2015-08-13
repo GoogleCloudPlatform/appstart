@@ -63,8 +63,9 @@ def get_logger():
     global _logger
     if _logger is None:
         _logger = logging.getLogger('appstart')
+        _logger.setLevel(logging.DEBUG)
         sh = logging.StreamHandler()
-        sh.setLevel(logging.INFO)
+        sh.setLevel(logging.DEBUG)
         formatter = logging.Formatter(fmt=FMT, datefmt=DATE_FMT)
         sh.setFormatter(formatter)
         _logger.addHandler(sh)

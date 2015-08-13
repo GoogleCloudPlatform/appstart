@@ -19,16 +19,20 @@ https://packaging.python.org/en/latest/distributing.html
 https://github.com/pypa/sampleproject
 """
 
-from setuptools import setup, find_packages
+# This file conforms to the external style guide.
+# pylint: disable=bad-indentation
+
 import codecs
 import os
+import setuptools
+
 
 here = os.path.abspath(os.path.dirname(__file__))
 
 with codecs.open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
-setup(
+setuptools.setup(
     name='appstart',
     version='0.8',
     description='A utility to start GAE Managed VMs in containers.',
@@ -51,7 +55,7 @@ setup(
         'Programming Language :: Python :: 3.4',
     ],
     keywords='GAE Google App Engine appengine development docker',
-    packages=find_packages(exclude='tests'),
+    packages=setuptools.find_packages(exclude='tests'),
     package_data={'appstart.devappserver_init': ['Dockerfile', 'das.sh'],
                   'appstart.pinger': ['Dockerfile'],
                   'appstart.sandbox': ['app.yaml']},

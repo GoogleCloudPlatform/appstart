@@ -35,7 +35,8 @@ class LoggingStream(object):
     """A fake 'stream' to be used for logging in tests."""
 
     def __init__(self, logfile, verbose_printing, formatter=None):
-        self.__logger = logging.getLogger('validator')
+        self.__logger = logging.getLogger('appstart.validator')
+        self.__logger.handlers = []
         self.__logger.setLevel(logging.DEBUG)
 
         # Don't send messages to root logger.
