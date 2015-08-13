@@ -26,11 +26,10 @@ import uuid
 
 import docker
 
-from appstart.sandbox import container_sandbox
+from appstart import constants
 
-
-DEFAULT_IMAGES = [container_sandbox.DEVAPPSERVER_IMAGE,
-                  container_sandbox.PINGER]
+DEFAULT_IMAGES = [constants.DEVAPPSERVER_IMAGE,
+                  constants.PINGER_IMAGE]
 images = list(DEFAULT_IMAGES)
 containers = []
 removed_containers = []
@@ -147,6 +146,10 @@ class FakeDockerClient(object):
         """Imitate docker.Client.start."""
         cont_to_start = find_container(cont_id)
         cont_to_start['Running'] = True
+
+    def images(*args, **kwargs):
+        return [{'RepoTags': [image_name]} for image_name in images]
+
 
 
 def find_container(cont_id):

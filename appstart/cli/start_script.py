@@ -27,6 +27,7 @@ import sys
 import time
 import warnings
 
+from .. import constants
 from .. import devappserver_init
 from .. import pinger
 from .. import utils
@@ -54,10 +55,10 @@ def main():
     # In response to 'appstart init', create a new devappserver base image.
     if parser_type == 'init':
         utils.build_from_directory(os.path.dirname(devappserver_init.__file__),
-                                   container_sandbox.DEVAPPSERVER_IMAGE,
+                                   constants.DEVAPPSERVER_IMAGE,
                                    **args)
         utils.build_from_directory(os.path.dirname(pinger.__file__),
-                                   container_sandbox.PINGER,
+                                   constants.PINGER_IMAGE,
                                    **args)
 
     # In response to 'appstart run', create a container sandbox and run it.

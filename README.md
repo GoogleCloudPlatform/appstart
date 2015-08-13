@@ -93,72 +93,9 @@ don't consume these services, you can run appstart like this:
 
 ## Options
 
+To see all command line options, run:
 
-### Ports
-
-By default, Appstart makes the user's application accessible on the docker host
-machine through port 8080, and the admin panel accessible through port
-8000. These defaults can be overidden with the `--application_port` and
-`--admin_port` options, respectively.
-
-
-### Application ID
-
-Appstart can be invoked with an application ID using the `--application_id`
-option.  This ID should be the same as the Google App Engine ID found on the
-Google Developers Console. In practice though, this ID can be arbitrarily chosen
-during development. It's important to realize that the application's ID
-determines which api storage files the application has access to. In other
-words, if Appstart is invoked once with `--application_id=foo`, it must be
-invoked with `--application_id=foo` in the future for the datastore, taskqueue,
-etc to persist. By default, if the `--application_id` option is not specified,
-Appstart chooses a new, timestamped ID during every invocation. Therefore, by
-default, the state of the api services does not persist.
-
-
-### Logging
-
-Managed VM applications are expected to write logs to `/var/log/app_engine`.
-Appstart provides volume-binding functionality to bind the `/var/log/app_engine`
-directory inside the application container to a directory on the machine hosting
-the docker server. In the typical setup, this is likely a boot2docker vm. By
-default, Appstart creates a timestamped log directory in `/tmp/log/app_engine`
-every time it's invoked. This default can be overidden by specifying a log
-directory with the `--log_path` option.
-
-
-### Storage path
-
-The api server creates files to store the state of the application's datastore,
-taskqueue, etc. These files are by default stored in `/tmp/app_engine/storage`
-on the docker host. An alternative storage path can be specified with the
-`--storage_path` option.
-
-A good use of this flag is to maintain multiple sets of test data.
-
-### Timeout
-
-The --timeout option specifies how long Appstart is willing to wait for the
-application to start listening on port 8080. By default, the timeout is 30
-seconds.
-
-
-## Flags
-
-### Caching during docker builds
-
-By default, when the application image is built, docker's cache is used.  To
-disable the use of docker's cache, set `--nocache`.
-
-### Forcing appstart to run with the wrong Docker version
-
-Appstart is designed to work with Docker server version 1.5.0. If Appstart
-detects any other Docker version, it will emit a warning and abort. However,
-Appstart can be forced to run with the `--force_version` flag.
-
-### Clearing the datastore
-
-The datastore can be cleared with the `--clear_datastore` flag.
+    $ appstart run --help
 
 ## Under the hood
 

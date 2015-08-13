@@ -72,6 +72,11 @@ class DockerTest(fake_docker.FakeDockerTestBase):
         with self.assertRaises(utils.AppstartAbort):
             utils.check_docker_version(dclient)
 
+    def test_find_image(self):
+        dclient = fake_docker.FakeDockerClient()
+        fake_docker.images.append('test')
+        self.assertTrue(utils.find_image('test'))
+
 
 class TarTest(unittest.TestCase):
     """Test the feature in utils that deal with tarfiles."""

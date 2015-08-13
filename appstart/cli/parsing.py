@@ -33,10 +33,15 @@ def make_appstart_parser():
         'to generate a devappserver base image.')
     subparsers = parser.add_subparsers(dest='parser_type')
 
-    run_parser = subparsers.add_parser('run')
+    run_parser = subparsers.add_parser('run',
+                                       help='Run a Managed VM application')
     add_appstart_args(run_parser)
 
-    init_parser = subparsers.add_parser('init')
+    init_parser = subparsers.add_parser('init',
+                                        help='Initialize the Docker '
+                                        'environment for Appstart. Must be '
+                                        'run before the first use of '
+                                        '"appstart run"')
     add_init_args(init_parser)
     return parser
 
@@ -59,26 +64,36 @@ def add_appstart_args(parser):
     parser.add_argument('--application_port',
                         default=8080,
                         type=int,
-                        help='The port where the application should be '
-                        'reached externally.')
+                        help='The port on the Docker host machine where '
+                        'the application should be reached. Defaults to '
+                        '8080.')
     parser.add_argument('--admin_port',
                         default='8000',
                         type=int,
-                        help='The port where the admin panel should be '
-                        'reached externally. ')
+                        help='The port on the Docker host machine where '
+                        'the admin panel should be reached. Defaults to '
+                        '8000.')
     parser.add_argument('--application_id',
                         default=None,
-                        help='The ID determines the Datastore '
-                        'the application has access to. '
-                        'This should be the same as the Google '
-                        'App Engine ID found on the '
-                        'Google Developers Console.')
+                        help='The api server uses this ID to maintain an '
+                        'isolated state for each application. Thus, the '
+                        'Application ID determines which Datastore '
+                        'the application container has access to. '
+                        'In theory, the ID should be the same as the Google '
+                        'App Engine ID found in the Google Developers '
+                        'Console. However, in practice, an arbitrary ID can '
+                        'be chosen during development. By default, if the ID '
+                        'is not specified, Appstart chooses a new, '
+                        'timestamped ID for every invocation.')
     parser.add_argument('--storage_path',
                         default='/tmp/appengine/storage',
-                        help='The directory where the application '
-                        'files should get stored. This includes '
-                        'the Datastore, Log Service files, Google Cloud '
-                        'Storage files, etc. ')
+                        help='The api server creates files to store the '
+                        "state of the application's datastore, taskqueue, "
+                        'etc. By default, these files are stored in '
+                        '/tmp/app_engine/storage on the docker host. '
+                        'An alternative storage path can be specified with '
+                        'this flag. A good use of this flag is to maintain '
+                        'multiple sets of test data.')
 
     # The port that the admin panel should bind to inside the container.
     parser.add_argument('--internal_admin_port',
@@ -100,13 +115,20 @@ def add_appstart_args(parser):
 
     parser.add_argument('--log_path',
                         default=None,
-                        help='The location where this container will '
-                        'output logs.')
+                        help='Managed VM application containers are expected '
+                        'to write logs to /var/log/app_engine. Appstart binds '
+                        'the /var/log/app_engine directory inside the '
+                        'application container to a directory in the Docker '
+                        'host machine. This option specifies which directory '
+                        'on the host machine to use for the binding. Defaults '
+                        'to a timestamped directory inside '
+                        '/tmp/log/app_engine.')
     parser.add_argument('--timeout',
                         type=int,
                         default=30,
                         help='How many seconds to wait for the application '
-                        'to start listening on port 8080.')
+                        'to start listening on port 8080. Defaults to 30 '
+                        'seconds.')
     parser.add_argument('config_file',
                         nargs='?',
                         default=None,
@@ -117,14 +139,14 @@ def add_appstart_args(parser):
     parser.add_argument('--no_cache',
                         action='store_true',
                         dest='nocache',
-                        help='If flag is set, docker will not use '
-                        'the cache during image builds.')
+                        help="Stop Appstart from using Docker's cache during "
+                        'image builds.')
     parser.set_defaults(nocache=False)
 
     parser.add_argument('--no_api_server',
                         action='store_false',
                         dest='run_api_server',
-                        help='Specifies whether to run an API server. '
+                        help='Stop Appstart from running an API server. '
                         'You do not need one if you do not consume '
                         'standard Google services such as taskqueue, '
                         'datastore, logging, etc.')
@@ -133,7 +155,7 @@ def add_appstart_args(parser):
     parser.add_argument('--force_version',
                         action='store_true',
                         dest='force_version',
-                        help='Force Appstart to run with mismatched docker '
+                        help='Force Appstart to run with mismatched Docker '
                         'version.')
     parser.set_defaults(force_version=False)
 

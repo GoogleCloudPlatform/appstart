@@ -34,14 +34,9 @@ import docker
 import configuration
 import container
 from .. import utils
+from .. import constants
 from ..utils import get_logger
 
-
-# Devappserver base image name
-DEVAPPSERVER_IMAGE = 'appstart_devappserver_base'
-
-# Pinger image name
-PINGER = 'appstart_pinger'
 
 # Maximum attempts to health check application container.
 MAX_ATTEMPTS = 30
@@ -345,7 +340,7 @@ class ContainerSandbox(object):
             self.app_container.start(network_mode=network_mode)
         except utils.AppstartAbort:
             if self.run_devappserver:
-                self.check_if_running(self.devappserver_container)
+                self.abort_if_not_running(self.devappserver_container)
             raise
 
         # Construct a pinger container and bind it to the application's network
@@ -353,13 +348,21 @@ class ContainerSandbox(object):
         # application's ports.
         pinger_name = self.make_timestamped_name('pinger', self.cur_time)
         self.pinger_container = container.PingerContainer(self.dclient)
-        self.pinger_container.create(name=pinger_name, image=PINGER)
+        try:
+            self.pinger_container.create(name=pinger_name,
+                                         image=constants.PINGER_IMAGE)
+        except utils.AppstartAbort:
+            if not utils.find_image(constants.PINGER_IMAGE):
+                raise utils.AppstartAbort('No pinger image found. '
+                                          'Did you forget to run "appstart '
+                                          'init"? ')
+            raise
 
         try:
             self.pinger_container.start(
                 network_mode='container:{}'.format(self.app_container.get_id()))
         except utils.AppstartAbort:
-            self.check_if_running(self.app_container)
+            self.abort_if_not_running(self.app_container)
             raise
 
         self.wait_for_start()
@@ -370,7 +373,7 @@ class ContainerSandbox(object):
         self.stop_and_remove_containers()
 
     @staticmethod
-    def check_if_running(cont):
+    def abort_if_not_running(cont):
         if not cont.running():
             cont.stream_logs(stream=False)
             raise utils.AppstartAbort('{0} stopped '
@@ -421,9 +424,9 @@ class ContainerSandbox(object):
                 exit_loop_with_error('The application server timed out.')
 
             if self.run_devappserver:
-                self.check_if_running(self.devappserver_container)
+                self.abort_if_not_running(self.devappserver_container)
 
-            self.check_if_running(self.app_container)
+            self.abort_if_not_running(self.app_container)
 
             if attempt % 4 == 0:
                 # \033[3D moves the cursor left 3 times. \033[K clears to the
@@ -477,7 +480,6 @@ class ContainerSandbox(object):
         Returns:
             (basestring) The name of the new devappserver image.
         """
-        # pylint: disable=too-many-locals, unused-variable
         # Collect the files that should be added to the docker build
         # context.
         files_to_add = {self.conf_path: None}
@@ -489,7 +491,7 @@ class ContainerSandbox(object):
         dockerfile = """
         FROM %(das_repo)s
         ADD %(path)s/* %(dest)s
-        """ %{'das_repo': DEVAPPSERVER_IMAGE,
+        """ %{'das_repo': constants.DEVAPPSERVER_IMAGE,
               'path': os.path.dirname(self.conf_path),
               'dest': os.path.join('/app', self.das_offset)}
 
@@ -508,7 +510,14 @@ class ContainerSandbox(object):
                                  tag=image_name)
 
         # Log the output of the build.
-        utils.log_and_check_build_results(res, image_name)
+        try:
+            utils.log_and_check_build_results(res, image_name)
+        except utils.AppstartAbort:
+            if not utils.find_image(constants.DEVAPPSERVER_IMAGE):
+                raise utils.AppstartAbort('No devappserver base image found. '
+                                          'Did you forget to run "appstart '
+                                          'init"?')
+            raise
         return image_name
 
     @staticmethod

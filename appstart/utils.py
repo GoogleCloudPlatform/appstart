@@ -285,6 +285,14 @@ class TarWrapper(object):
         return self.tarfile.extractfile(tinfo).read()
 
 
+def find_image(image_name):
+    dclient = get_docker_client()
+    for image in dclient.images():
+        if image_name in image['RepoTags']:
+            return True
+    return False
+
+
 def log_and_check_build_results(build_res, image_name):
         """Log the results of a docker build.
 

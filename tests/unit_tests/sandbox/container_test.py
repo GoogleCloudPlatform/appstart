@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for sandbox.container."""
+"""Unit tests for appstart.sandbox.container."""
 
 # This file conforms to the external style guide.
 # pylint: disable=bad-indentation, g-bad-import-order
 
 import unittest
 
-from appstart import sandbox
+from appstart.sandbox import container
 from fakes import fake_docker
 
 
@@ -28,7 +28,7 @@ class TestContainerExit(fake_docker.FakeDockerTestBase):
     def setUp(self):
         # Simulate that a SIGINT was caught by setting global _EXITING var
         super(TestContainerExit, self).setUp()
-        self.stubs.Set(sandbox.container, '_EXITING', True)
+        self.stubs.Set(container, '_EXITING', True)
 
         # Pretend that we've created an image called 'temp'
         fake_docker.images.append('temp')
@@ -38,10 +38,10 @@ class TestContainerExit(fake_docker.FakeDockerTestBase):
 
         # container should detect that a KeyboardInterrupt was raised and
         # manually raise it again.
-        container = sandbox.container.Container(dclient)
+        cont = container.Container(dclient)
         with self.assertRaises(KeyboardInterrupt):
-            container.create(name='temp', image='temp')
-        self.assertIsNotNone(container._container_id)
+            cont.create(name='temp', image='temp')
+        self.assertIsNotNone(cont._container_id)
 
 
 class TestContainer(fake_docker.FakeDockerTestBase):
@@ -50,7 +50,7 @@ class TestContainer(fake_docker.FakeDockerTestBase):
         super(TestContainer, self).setUp()
         self.dclient = fake_docker.FakeDockerClient()
         fake_docker.images.append('temp')
-        self.cont = sandbox.container.Container(self.dclient)
+        self.cont = container.Container(self.dclient)
         self.cont.create(name='temp',
                          image='temp')
 
