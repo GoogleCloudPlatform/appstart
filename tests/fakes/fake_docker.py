@@ -20,6 +20,8 @@ This class is used for unit testing ContainerSandbox.
 # pylint: disable=bad-indentation
 
 import requests
+import stubout
+import unittest
 import uuid
 
 import docker
@@ -153,3 +155,16 @@ def find_container(cont_id):
         if cont['Id'] == cont_id:
             return cont
     raise docker.errors.APIError('container was not found.', requests.Response())
+
+
+class FakeDockerTestBase(unittest.TestCase):
+
+    def setUp(self):
+        self.stubs = stubout.StubOutForTesting()
+        self.stubs.Set(docker, 'Client', FakeDockerClient)
+        reset()
+
+    def tearDown(self):
+        """Restore docker.Client and requests.get."""
+        reset()
+        self.stubs.UnsetAll()

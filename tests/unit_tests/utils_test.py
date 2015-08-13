@@ -35,13 +35,8 @@ CERT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)),
 APP_DIR = os.path.join(os.path.dirname(__file__), 'system_tests')
 
 
-class DockerTest(unittest.TestCase):
+class DockerTest(fake_docker.FakeDockerTestBase):
     """Test error detection in Docker build results."""
-
-    def setUp(self):
-        self.old_docker_client = docker.Client
-        docker.Client = fake_docker.FakeDockerClient
-        fake_docker.reset()
 
     def test_get_docker_client(self):
         os.environ['DOCKER_HOST'] = 'tcp://192.168.59.103:2376'
@@ -76,9 +71,6 @@ class DockerTest(unittest.TestCase):
         dclient.version = lambda: {'Version': '1.6.0'}
         with self.assertRaises(utils.AppstartAbort):
             utils.check_docker_version(dclient)
-
-    def tearDown(self):
-        docker.Client = self.old_docker_client
 
 
 class TarTest(unittest.TestCase):

@@ -5,6 +5,7 @@
 
 import logging
 import os
+import stubout
 import tempfile
 import unittest
 
@@ -17,27 +18,24 @@ from appstart import utils
 from fakes import fake_docker
 
 
-class TestBase(unittest.TestCase):
-
-    @classmethod
-    def setUpClass(cls):
-        test_directory = tempfile.mkdtemp()
-        app_yaml = 'vm: true'
-        cls.conf_file = open(os.path.join(test_directory, 'app.yaml'), 'w')
-        cls.conf_file.write(app_yaml)
-        cls.conf_file.close()
+class TestBase(fake_docker.FakeDockerTestBase):
 
     def setUp(self):
-        self.old_docker_client = docker.Client
-        docker.Client = fake_docker.FakeDockerClient
+        super(TestBase, self).setUp()
+        test_directory = tempfile.mkdtemp()
+        app_yaml = 'vm: true'
+        self.conf_file = open(os.path.join(test_directory, 'app.yaml'), 'w')
+        self.conf_file.write(app_yaml)
+        self.conf_file.close()
+
         self.mocker = mox.Mox()
-        fake_docker.reset()
 
     def tearDown(self):
         """Restore docker.Client and requests.get."""
+        super(TestBase, self).tearDown()
         self.mocker.VerifyAll()
         self.mocker.UnsetStubs()
-        docker.Client = self.old_docker_client
+        self.stubs.UnsetAll()
 
 
 # pylint: disable=too-many-public-methods
@@ -50,13 +48,14 @@ class CreateAndRemoveContainersTest(TestBase):
             sandbox.container.PingerContainer.ping_application_container)
 
         # Fake out ping. Under the hood, this is a docker exec.
-        sandbox.container.PingerContainer.ping_application_container = (
-            lambda self: True)
+        self.stubs.Set(sandbox.container.PingerContainer,
+                       'ping_application_container',
+                       lambda self: True)
 
         # Fake out stream_logs, as this will try to start another thread.
-        self.old_logs = sandbox.container.Container.stream_logs
-        sandbox.container.Container.stream_logs = (
-            lambda unused_self, unused_stream=True: None)
+        self.stubs.Set(sandbox.container.Container,
+                       'stream_logs',
+                       lambda unused_self, unused_stream=True: None)
 
     def test_start_from_conf(self):
         """Test ContainerSandbox.start."""
@@ -92,14 +91,6 @@ class CreateAndRemoveContainersTest(TestBase):
     def test_start_no_image_no_conf(self):
         with self.assertRaises(utils.AppstartAbort):
             sandbox.container_sandbox.ContainerSandbox()
-
-    def tearDown(self):
-        super(CreateAndRemoveContainersTest, self).tearDown()
-
-        # Reset everything
-        sandbox.container.PingerContainer.ping_application_container = (
-            self.old_ping)
-        sandbox.container.Container.stream_logs = self.old_logs
 
 
 class BadVersionTest(unittest.TestCase):

@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilities to locally deploy a managed vm application for testing."""
+"""Utilities to deploy a managed VM application locally for testing."""

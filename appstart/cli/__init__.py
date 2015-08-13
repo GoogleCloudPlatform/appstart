@@ -13,4 +13,3 @@
 # limitations under the License.
 
 """CLI to locally deploy a managed vm application for testing."""
-import start_script

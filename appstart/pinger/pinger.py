@@ -23,11 +23,11 @@ on the container by mapping some port X on the Docker host to 8080 within the
 application, where X is determined at runtime. For proper behavior, the
 application needs to actually be listening on port 8080. To determine if the
 application is in fact listening on the port, it's not enough to simply
-establish a socket with port X on the Docker host. Due to the way port mappings
-are done, a socket can always be established with port X, even if there's
-nothing listening on 8080 inside the container. To bypass this issue, the
-pinger tries to establish a socket on 8080 from INSIDE the same network stack
-as the application.
+establish a connection with port X on the Docker host. Due to the way port
+mappings are done, a connection can always be established with port X, even if
+there's nothing listening on 8080 inside the container. To bypass this issue,
+the pinger tries to establish a socket on 8080 from INSIDE the same network
+stack as the application.
 
 The alternative is simply to send an actual request to port X. Due to the port
 mapping, docker would attempt to forward the request to 8080 inside the

@@ -23,34 +23,32 @@ from appstart import sandbox
 from fakes import fake_docker
 
 
-class TestContainerExit(unittest.TestCase):
+class TestContainerExit(fake_docker.FakeDockerTestBase):
 
     def setUp(self):
         # Simulate that a SIGINT was caught by setting global _EXITING var
-        sandbox.container._EXITING = True
-        fake_docker.reset()
-        self.dclient = fake_docker.FakeDockerClient()
+        super(TestContainerExit, self).setUp()
+        self.stubs.Set(sandbox.container, '_EXITING', True)
 
         # Pretend that we've created an image called 'temp'
         fake_docker.images.append('temp')
 
     def test_exit_from_create(self):
+        dclient = fake_docker.FakeDockerClient()
+
         # container should detect that a KeyboardInterrupt was raised and
         # manually raise it again.
-        container = sandbox.container.Container(self.dclient)
+        container = sandbox.container.Container(dclient)
         with self.assertRaises(KeyboardInterrupt):
             container.create(name='temp', image='temp')
         self.assertIsNotNone(container._container_id)
 
-    def tearDown(self):
-        sandbox.container._EXITING = False
 
-
-class TestContainer(unittest.TestCase):
+class TestContainer(fake_docker.FakeDockerTestBase):
 
     def setUp(self):
+        super(TestContainer, self).setUp()
         self.dclient = fake_docker.FakeDockerClient()
-        fake_docker.reset()
         fake_docker.images.append('temp')
         self.cont = sandbox.container.Container(self.dclient)
         self.cont.create(name='temp',
