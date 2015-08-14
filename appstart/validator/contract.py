@@ -127,21 +127,21 @@ HOOK_DIRECTORY = 'validator_tests'
 _REQUIRED_ATTRS = ['lifecycle_point', 'title', 'description']
 
 _DEFAULT_ATTRS = {'dependencies': set(),
-                  'dependants': set(),
+                  'dependents': set(),
                   'before': set(),
                   'after': set(),
                   'tags': set(),
                   'error_level': UNUSED,
                   '_unresolved_before': set(),
                   '_unresolved_after': set(),
-                  '_unresolved_dependants': set(),
+                  '_unresolved_dependents': set(),
                   '_unresolved_dependencies': set(),
                   '_conf_file': None}
 
 # Keys for a yaml test configuration
 _REQUIRED_YAML_ATTRS = ['name'] + _REQUIRED_ATTRS
 _DEFAULT_YAML_ATTRS = {'dependencies': [],
-                       'dependants': [],
+                       'dependents': [],
                        'before': [],
                        'after': [],
                        'tags': [],
@@ -483,17 +483,17 @@ class ContractClause(unittest.TestCase):
             if the clauses in this set pass.
         before: {[class, ...]} A set of clauses (ContractClause classes)
             to evaluate BEFORE the current clause.
-        dependants: {[class, ...]} A set of classes that inherit from
-            ContractClause. This clause will be added to the dependency sets
-            of all dependants. In other words, the dependants are to depend on
+        dependents: {[class, ...]} A set of classes that inherit from
+            ContractClause. This clause will be added to the dependency sets 
+            of all dependents. In other words, the dependents are to depend on
             this clause.
         after: {[class, ...]} A set of clauses (ContractClause classes)
             to evaluate AFTER the current clause.
 
-        The point of 'after' and 'dependants' is to allow hook clauses to
-        place themselves before a default clause of the runtime contract.
+        The point of 'after' and 'dependents' is to allow hook clauses to
+        place themselves before a default clause of the runtime contract. 
         However, the code for the default clauses is not to be modified.
-        Implementing 'dependants' and 'afters' is a good workaround.
+        Implementing 'dependents' and 'afters' is a good workaround.
 
     Required:
         lifecycle_point: (int) A point corresponding to a time period
@@ -676,7 +676,7 @@ class ContractValidator(object):
 
         Resolving dependencies:
         At the time this function is called, clauses may have lists of
-        _unresolved_dependencies, _unresolved_dependants, etc. These are just
+        _unresolved_dependencies, _unresolved_dependents, etc. These are just
         lists of strings that are supposed to correspond to other clauses. This
         method resolves the clause names to *actual* clauses. The reason that
         this resolution is necessary is that hook clauses might depend on other
@@ -687,7 +687,7 @@ class ContractValidator(object):
         method).
 
         Arranging chronology:
-        This method arranges dependants to set up a depth first traversal
+        This method arranges dependents to set up a depth first traversal
         of the dependency graph. That is, each clause may have a list of
         dependents - other clauses that must depend on the first clause.
         For instance, suppose clause X has clauses A, B and C as dependents.
@@ -721,13 +721,13 @@ class ContractValidator(object):
             # depend on their custom clause without having to change this code.
             resolve(clause.after, clause._unresolved_after)
             resolve(clause.before, clause._unresolved_before)
-            resolve(clause.dependants, clause._unresolved_dependants)
+            resolve(clause.dependents, clause._unresolved_dependents)
             resolve(clause.dependencies, clause._unresolved_dependencies)
 
-            # If X has dependant A, add X to A's dependencies.
-            for dependant_clause in clause.dependants:
-                if clause not in dependant_clause.dependencies:
-                    dependant_clause.dependencies.add(clause)
+            # If X has dependent A, add X to A's dependencies.
+            for dependent_clause in clause.dependents:
+                if clause not in dependent_clause.dependencies:
+                    dependent_clause.dependencies.add(clause)
 
             for after_clause in clause.after:
                 if clause not in after_clause.before:
@@ -938,14 +938,14 @@ class ContractValidator(object):
             lifecycle_point = _TIMELINE_NAMES_TO_NUMBERS.get(
                 hook_config['lifecycle_point'])
 
-            # Currently, dependencies, dependants, before, and after are
-            # unresolved. That is, they refer to clause names, not classes. We
-            # cannot resolve them to classes yet, because we need to finish
-            # creating all of the clauses. (Imagine the scenario where custom
-            # hook x wants to run before custom hook y, but y has not yet been
+            # Currently, dependencies, dependents, before, and after are
+            # unresolved. That is, they refer to clause names, not classes.
+            # We cannot resolve them yet, because we need to finish creating
+            # all of the clauses. (Imagine the scenario where custom hook x
+            # wants to run before custom hook y, but y has not yet been
             # created.
             _unresolved_dependencies = set(hook_config['dependencies'])
-            _unresolved_dependants = set(hook_config['dependants'])
+            _unresolved_dependents = set(hook_config['dependents'])
             _unresolved_before = set(hook_config['before'])
             _unresolved_after = set(hook_config['after'])
             _conf_file = yaml_file
@@ -1018,6 +1018,35 @@ class ContractValidator(object):
                 return func(*args, **kwargs)
 
         return _wrapper
+
+    def list_clauses(self):
+        keys = self._clause_dict.keys()
+        keys.sort()
+
+        def make_name_list(class_list):
+            names = [c.__name__ for c in class_list]
+            return ', '.join(names)
+
+        for clause in [self._clause_dict[name] for name in keys]:
+            print clause.__name__ 
+            print '\tTitle: {0}'.format(clause.title)
+            print '\tDescription: {0}'.format(clause.description)
+            print '\tTags: {0}'.format(', '.join([t for t in clause.tags]))
+            
+            error_level = LEVEL_NUMBERS_TO_NAMES[clause.error_level]
+            print '\tError Level: {0}'.format(error_level)
+
+            if clause.dependencies:
+                print '\tDependencies: {0}'.format(make_name_list(
+                                                       clause.dependencies))
+            if clause.dependents:
+                print '\tDependants: {0}'.format(make_name_list(
+                                                     clause.dependents))
+            if clause.before:
+                print '\tBefore: {0}'.format(make_name_list(clause.before))
+
+            if clause.after:
+                print '\tAfter: {0}'.format(make_name_list(clause.after))
 
     def validate(self,
                  tags=None,

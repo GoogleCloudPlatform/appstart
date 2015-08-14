@@ -148,7 +148,7 @@ class ClauseTest(ClauseTestBase):
             title = 'Test'
             description = 'foo'
             lifecycle_point = contract.POST_START
-            _unresolved_dependants = {'TestClause2'}
+            _unresolved_dependents = {'TestClause2'}
             _unresolved_after = {'TestClause3'}
 
         class TestClause2(contract.ContractClause):
@@ -169,7 +169,7 @@ class ClauseTest(ClauseTestBase):
                        'TestClause3': TestClause3}
 
         contract.ContractValidator._normalize_clause_dict(clause_dict)
-        self.assertEqual(TestClause.dependants, {TestClause2})
+        self.assertEqual(TestClause.dependents, {TestClause2})
         self.assertEqual(TestClause.after, {TestClause3})
         self.assertEqual(TestClause2.before, {TestClause})
         self.assertEqual(TestClause2.dependencies, {TestClause})
@@ -384,7 +384,7 @@ class HookClauseTest(ClauseTestBase):
             title = 'test'
             description = 'test'
             lifecycle_point = contract.POST_START
-            dependants = {Test3}
+            dependents = {Test3}
 
             def evaluate_clause(self, app_container):
                 ordering.append(self)

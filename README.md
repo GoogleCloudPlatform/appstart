@@ -208,8 +208,8 @@ the validator recursively walks it, looking for any configuration files that
 end with `.conf.yaml`. For every such file found, the validator generates a
 hook clause, which will be evaluated along with all of the validator's default
 clauses. Note that for the validator to discover hook clauses, it must be run
-on the application's configuration file. In other words, hook clause will
-not fire if the following command is run:
+on the application's configuration file. In other words, hook clauses will
+not be discovered if the following command is run:
 
     $ appstart validate --image_name=<IMAGE_TO_RUN>
 
@@ -285,8 +285,8 @@ be put into a hook clause's `.conf.yaml` file:
   * dependencies: A list of clauses that must have passed before the hook clause
     is evaluated. If any of the hook clauses dependencies have failed, the hook
     clause will be skipped.
-  * dependants: A list of clauses whose evaluation should be contingent on the
-    success of the hook clause. If the hook clause fails, none of its dependants
+  * dependents: A list of clauses whose evaluation should be contingent on the
+    success of the hook clause. If the hook clause fails, none of its dependents
     will run.
   * before: A list of clauses that should be evaluated BEFORE the hook clause.
     Similar to dependencies, but the hook clause will run even if any of its
@@ -312,3 +312,11 @@ with a little more configuration:
     after:
         - HealthCheckClause
     command: /path/to/some/executable
+
+### Clause Names
+
+As stated above, dependencies among clauses are expressed by name. To see the
+list of all clause names currently available to the validator, including hook
+clauses, run:
+
+    $ appstart validate <PATH_TO_CONFIG> --list

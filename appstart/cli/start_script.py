@@ -90,12 +90,16 @@ def main():
         threshold = args.pop('threshold')
         tags = args.pop('tags')
         verbose = args.pop('verbose')
+        list_clauses = args.pop('list_clauses')
         success = False
         utils.get_logger().setLevel(logging.INFO)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 validator = contract.ContractValidator(runtime_contract, **args)
+                if list_clauses:
+                    validator.list_clauses()
+                    sys.exit(0)
                 success = validator.validate(tags, threshold, logfile, verbose)
         except KeyboardInterrupt:
             utils.get_logger().info('Exiting')

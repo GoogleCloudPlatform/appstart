@@ -23,6 +23,16 @@ import logging
 import color_formatting
 
 
+_logger = None
+
+
+def get_validator_logger():
+    global _logger
+    if not _logger:
+        _logger = logging.getLogger('appstart.validator')
+    return _logger
+
+
 class LogfileHandler(logging.FileHandler):
 
     def emit(self, record):
@@ -35,7 +45,7 @@ class LoggingStream(object):
     """A fake 'stream' to be used for logging in tests."""
 
     def __init__(self, logfile, verbose_printing, formatter=None):
-        self.__logger = logging.getLogger('appstart.validator')
+        self.__logger = get_validator_logger()
         self.__logger.handlers = []
         self.__logger.setLevel(logging.DEBUG)
 

@@ -61,6 +61,7 @@ def add_validate_args(parser):
     parser.add_argument('--log_file',
                         default=None,
                         help='Logfile to collect validation results.')
+
     parser.add_argument('--threshold',
                         default='WARNING',
                         choices=[name for _, name in
@@ -74,6 +75,12 @@ def add_validate_args(parser):
                         dest='verbose',
                         help='Whether to emit verbose output to stdout.')
     parser.set_defaults(verbose=False)
+
+    parser.add_argument('--list',
+                        action='store_true',
+                        dest='list_clauses',
+                        help='List the clauses available to the validator.')
+    parser.set_defaults(list_clauses=False)
 
 
 def add_init_args(parser):
