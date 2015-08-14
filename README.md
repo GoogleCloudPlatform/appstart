@@ -258,7 +258,7 @@ Make sure that test.py is an executable. To do this, you can run:
 
 The hook clause will only be considered a failure if the executable returns a
 nonzero exit code. In the case of failure, the stdout and stderr of the
-executable will be reported in the test results.
+executable will be reported in the test results. 
 
 ### Configuring Hook Clauses
 
