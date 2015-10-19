@@ -1,6 +1,6 @@
 SDK_ROOT=/sdk/$(ls /sdk/)
 export PYTHONPATH=$SDK_ROOT/lib/
-python $(find $SDK_ROOT -name dev_appserver.py) \
+python $(find $SDK_ROOT -name dev_appserver.py | head -1) \
     --allow_skipped_files=False \
     --api_host=0.0.0.0 \
     --api_port=$API_PORT \

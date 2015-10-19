@@ -26,6 +26,7 @@ import os
 import requests
 import time
 import unittest
+from appstart import utils,devappserver_init
 
 from appstart.sandbox import container_sandbox
 
@@ -42,6 +43,12 @@ class SystemTests(unittest.TestCase):
 
         This depends on a properly set up docker environment.
         """
+        
+        SystemTests.base_image="appstart_systemtest_devappserver"
+        
+        utils.build_from_directory(os.path.dirname(devappserver_init.__file__),
+                           SystemTests.base_image,nocache=True)
+
         test_directory = os.path.dirname(os.path.realpath(__file__))
         cls.conf_file = os.path.join(test_directory, 'app.yaml')
 
@@ -49,7 +56,7 @@ class SystemTests(unittest.TestCase):
         temp_storage_path = '/tmp/storage/%s' % str(time.time())
         cls.sandbox = container_sandbox.ContainerSandbox(
             cls.conf_file,
-            storage_path=temp_storage_path)
+            storage_path=temp_storage_path,base_image=SystemTests.base_image)
 
         # Set up the containers
         cls.sandbox.start()
