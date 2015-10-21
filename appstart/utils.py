@@ -93,6 +93,19 @@ def check_docker_version(dclient):
                             'anyway'.format(DOCKER_SERVER_VERSION,
                                             server_version))
 
+# TODO(mmuller): "ClientWrapper" is a pretty horrible kludge.  Rewrite it so
+# that it doesn't indiscriminately reconnect every time an attribute is
+# accessed.
+
+
+class ClientWrapper(object):
+
+    def __init__(self, **params):
+        self.__params = params
+
+    def __getattr__(self, attrname):
+        return getattr(docker.Client(**self.__params), attrname)
+
 
 def get_docker_client():
     """Get the user's docker client.
@@ -142,7 +155,7 @@ def get_docker_client():
             assert_hostname=False)
 
     # pylint: disable=star-args
-    client = docker.Client(version=DOCKER_API_VERSION,
+    client = ClientWrapper(version=DOCKER_API_VERSION,
                            timeout=TIMEOUT_SECS,
                            **params)
     try:
