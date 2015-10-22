@@ -26,7 +26,7 @@ import os
 import requests
 import time
 import unittest
-from appstart import utils,devappserver_init
+from appstart import utils, devappserver_init
 
 from appstart.sandbox import container_sandbox
 
@@ -42,10 +42,11 @@ class SystemTests(unittest.TestCase):
         This depends on a properly set up docker environment.
         """
         
-        SystemTests.base_image="appstart_systemtest_devappserver"
+        SystemTests.base_image = "appstart_systemtest_devappserver"
         
         utils.build_from_directory(os.path.dirname(devappserver_init.__file__),
-                           SystemTests.base_image,nocache=True)
+                                   SystemTests.base_image,
+                                   nocache=True)
 
         test_directory = os.path.dirname(os.path.realpath(__file__))
         cls.conf_file = os.path.join(test_directory, 'app.yaml')
@@ -56,8 +57,7 @@ class SystemTests(unittest.TestCase):
             cls.conf_file,
             storage_path=temp_storage_path,
             devbase_image=SystemTests.base_image,
-            force_version=True
-            )
+            force_version=True)
 
         # Set up the containers
         cls.sandbox.start()
@@ -66,7 +66,6 @@ class SystemTests(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up the docker environment."""
         cls.sandbox.stop()
-
 
 def make_endpoint_test(endpoint, handler):
     """Create and return a function that tests the endpoint.
@@ -98,9 +97,11 @@ if __name__ == '__main__':
 
     # Sync with urls in services_test_app.py
     # Keeping handler as None for later on customizing of tests
-    urls = [('/datastore', None),
+    urls = [
+        ('/datastore', None),
         ('/logging', None),
-        ('/memcache', None)]
+        ('/memcache', None)
+    ]
 
     
     # Get all the endpoints from the test app and turn them into tests.

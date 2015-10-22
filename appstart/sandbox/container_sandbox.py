@@ -503,9 +503,9 @@ class ContainerSandbox(object):
         dockerfile = """
         FROM %(das_repo)s
         ADD %(path)s/* %(dest)s
-        """ %{'das_repo': devbase_image,
-              'path': os.path.dirname(self.conf_path),
-              'dest': os.path.join('/app', self.das_offset)}
+        """ % {'das_repo': devbase_image,
+               'path': os.path.dirname(self.conf_path),
+               'dest': os.path.join('/app', self.das_offset)}
 
         # Construct a file-like object from the Dockerfile.
         dockerfile_obj = io.BytesIO(dockerfile.encode('utf-8'))
