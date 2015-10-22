@@ -21,7 +21,7 @@ python $(find $SDK_ROOT -name dev_appserver.py | head -1) \
     --port=$PROXY_PORT \
     --smtp_allow_tls=False \
     --use_mtime_file_watcher=False \
-    --external_port=8080 \
+    --external_port=8088 \
     --host=0.0.0.0 \
     --storage_path=/storage \
     --logs_path=./log.txt \

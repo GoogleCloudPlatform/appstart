@@ -30,8 +30,6 @@ from appstart import utils,devappserver_init
 
 from appstart.sandbox import container_sandbox
 
-import services_test_app
-
 
 # pylint: disable=too-many-public-methods
 class SystemTests(unittest.TestCase):
@@ -56,7 +54,10 @@ class SystemTests(unittest.TestCase):
         temp_storage_path = '/tmp/storage/%s' % str(time.time())
         cls.sandbox = container_sandbox.ContainerSandbox(
             cls.conf_file,
-            storage_path=temp_storage_path,base_image=SystemTests.base_image)
+            storage_path=temp_storage_path,
+            devbase_image=SystemTests.base_image,
+            force_version=True
+            )
 
         # Set up the containers
         cls.sandbox.start()
@@ -87,15 +88,23 @@ def make_endpoint_test(endpoint, handler):
         self.assertEqual(res.status_code,
                          200,
                          '%s failed with error \"%s\"' %
-                         (handler.__name__, res.text))
+                         (endpoint, res.text))
     _endpoint_test.__name__ = 'test_%s_endpoint' % endpoint.strip('/')
     return _endpoint_test
 
 
 if __name__ == '__main__':
     logging.getLogger('appstart').setLevel(logging.INFO)
+
+    # Sync with urls in services_test_app.py
+    # Keeping handler as None for later on customizing of tests
+    urls = [('/datastore', None),
+        ('/logging', None),
+        ('/memcache', None)]
+
+    
     # Get all the endpoints from the test app and turn them into tests.
-    for ep, handlr in services_test_app.urls:
+    for ep, handlr in urls:
         endpoint_test = make_endpoint_test(ep, handlr)
         setattr(SystemTests, endpoint_test.__name__, endpoint_test)
     unittest.main()
