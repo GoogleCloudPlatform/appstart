@@ -21,6 +21,7 @@ import logging
 import io
 import json
 import os
+import re
 import requests
 import socket
 import ssl
@@ -48,6 +49,8 @@ _logger = None
 FMT = '[%(levelname).1s: %(asctime)s] %(message)s'
 DATE_FMT = '%H:%M:%S'
 
+INT_RX = re.compile(r'\d+')
+
 
 class AppstartAbort(Exception):
     pass
@@ -72,10 +75,19 @@ def get_logger():
     return _logger
 
 
+def _soft_int(val):
+    """Convert strings to integers without dying on non-integer values."""
+    m = INT_RX.match(val)
+    if m:
+        return int(m.group())
+    else:
+        return 0
+
+
 def check_docker_version(dclient):
     """Check version of docker server and log errors if it's too old/new.
 
-    The currently supported version of docker is 1.5.0.
+    The currently supported versions of docker are 1.5.0 to 1.8.x
 
     Args:
         dclient: (docker.Client) The docker client to use to connect to the
@@ -85,8 +97,8 @@ def check_docker_version(dclient):
         AppstartAbort: If user's docker server version is not correct.
     """
     version = dclient.version()
-    server_version = version.get('Version')
-    if server_version != '1.5.0':
+    server_version = [_soft_int(x) for x in version.get('Version').split('.')]
+    if server_version < [1, 5, 0] or server_version > [1, 8, 1000]:
         raise AppstartAbort('Expected docker server version {0}. '
                             'Found server version {1}. Use --force_version '
                             'flag to run Appstart '
