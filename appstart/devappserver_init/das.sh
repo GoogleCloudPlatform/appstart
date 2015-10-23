@@ -1,6 +1,6 @@
 SDK_ROOT=/sdk/$(ls /sdk/)
 export PYTHONPATH=$SDK_ROOT/lib/
-python $(find $SDK_ROOT -name dev_appserver.py) \
+python $(find $SDK_ROOT -name dev_appserver.py | head -1) \
     --allow_skipped_files=False \
     --api_host=0.0.0.0 \
     --api_port=$API_PORT \
@@ -21,7 +21,7 @@ python $(find $SDK_ROOT -name dev_appserver.py) \
     --port=$PROXY_PORT \
     --smtp_allow_tls=False \
     --use_mtime_file_watcher=False \
-    --external_port=8080 \
+    --external_port=8088 \
     --host=0.0.0.0 \
     --storage_path=/storage \
     --logs_path=./log.txt \

@@ -81,7 +81,8 @@ class ContainerSandbox(object):
                  storage_path='/tmp/app_engine/storage',
                  nocache=False,
                  timeout=MAX_ATTEMPTS,
-                 force_version=False):
+                 force_version=False,
+                 devbase_image=constants.DEVAPPSERVER_IMAGE):
         """Get the sandbox ready to construct and run the containers.
 
         Args:
@@ -127,6 +128,8 @@ class ContainerSandbox(object):
                 should be mapped to the admin server, which runs inside
                 the devappserver container. The admin panel will be
                 accessible through this port.
+            devbase_image: (basestring or None): If specified, the sandbox
+                will build the devappserver on the specified base_image
             clear_datastore: (bool) Whether or not to clear the datastore.
                 If True, this eliminates all of the data from the datastore
                 before running the api server.
@@ -184,7 +187,12 @@ class ContainerSandbox(object):
         self.pinger_container = None
         self.nocache = nocache
         self.run_devappserver = run_api_server
-        self.timeout = timeout
+        self.timeout = timeout        
+        self.devbase_image=constants.DEVAPPSERVER_IMAGE
+        
+        
+        if devbase_image:
+          self.devbase_image=devbase_image
 
         if config_file:
             self.conf_path = os.path.abspath(config_file)
@@ -241,7 +249,9 @@ class ContainerSandbox(object):
                        'CONFIG_FILE': os.path.join(
                            self.das_offset,
                            os.path.basename(self.conf_path))}
-            devappserver_image = self.build_devappserver_image()
+            devappserver_image = self.build_devappserver_image(
+              devbase_image=self.devbase_image
+            )
             devappserver_container_name = (
                 self.make_timestamped_name('devappserver',
                                            self.cur_time))
@@ -474,7 +484,7 @@ class ContainerSandbox(object):
         utils.build_from_directory(self.app_dir, name)
         return name
 
-    def build_devappserver_image(self):
+    def build_devappserver_image(self,devbase_image=constants.DEVAPPSERVER_IMAGE):
         """Build a layer over devappserver to include application files.
 
         The new image contains the user's config files.
@@ -493,9 +503,9 @@ class ContainerSandbox(object):
         dockerfile = """
         FROM %(das_repo)s
         ADD %(path)s/* %(dest)s
-        """ %{'das_repo': constants.DEVAPPSERVER_IMAGE,
-              'path': os.path.dirname(self.conf_path),
-              'dest': os.path.join('/app', self.das_offset)}
+        """ % {'das_repo': devbase_image,
+               'path': os.path.dirname(self.conf_path),
+               'dest': os.path.join('/app', self.das_offset)}
 
         # Construct a file-like object from the Dockerfile.
         dockerfile_obj = io.BytesIO(dockerfile.encode('utf-8'))

@@ -26,11 +26,11 @@ import os
 import requests
 import time
 import unittest
+from appstart import utils, devappserver_init
 
 from appstart.sandbox import container_sandbox
 
-import services_test_app
-
+APPSTART_BASE_IMAGE = "appstart_systemtest_devappserver"
 
 # pylint: disable=too-many-public-methods
 class SystemTests(unittest.TestCase):
@@ -42,6 +42,11 @@ class SystemTests(unittest.TestCase):
 
         This depends on a properly set up docker environment.
         """
+        
+        utils.build_from_directory(os.path.dirname(devappserver_init.__file__),
+                                   APPSTART_BASE_IMAGE,
+                                   nocache=True)
+
         test_directory = os.path.dirname(os.path.realpath(__file__))
         cls.conf_file = os.path.join(test_directory, 'app.yaml')
 
@@ -49,7 +54,9 @@ class SystemTests(unittest.TestCase):
         temp_storage_path = '/tmp/storage/%s' % str(time.time())
         cls.sandbox = container_sandbox.ContainerSandbox(
             cls.conf_file,
-            storage_path=temp_storage_path)
+            storage_path=temp_storage_path,
+            devbase_image=APPSTART_BASE_IMAGE,
+            force_version=True)
 
         # Set up the containers
         cls.sandbox.start()
@@ -59,8 +66,7 @@ class SystemTests(unittest.TestCase):
         """Clean up the docker environment."""
         cls.sandbox.stop()
 
-
-def make_endpoint_test(endpoint, handler):
+def make_endpoint_test(endpoint):
     """Create and return a function that tests the endpoint.
 
     Args:
@@ -80,15 +86,25 @@ def make_endpoint_test(endpoint, handler):
         self.assertEqual(res.status_code,
                          200,
                          '%s failed with error \"%s\"' %
-                         (handler.__name__, res.text))
+                         (endpoint, res.text))
     _endpoint_test.__name__ = 'test_%s_endpoint' % endpoint.strip('/')
     return _endpoint_test
 
 
 if __name__ == '__main__':
     logging.getLogger('appstart').setLevel(logging.INFO)
+
+    # Sync with urls in services_test_app.py
+    # Keeping handler as None for later on customizing of tests
+    urls = [
+         '/datastore',
+         '/logging', 
+         '/memcache'
+    ]
+
+    
     # Get all the endpoints from the test app and turn them into tests.
-    for ep, handlr in services_test_app.urls:
-        endpoint_test = make_endpoint_test(ep, handlr)
+    for ep in urls:
+        endpoint_test = make_endpoint_test(ep)
         setattr(SystemTests, endpoint_test.__name__, endpoint_test)
     unittest.main()
