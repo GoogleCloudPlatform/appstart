@@ -68,7 +68,7 @@ class DockerTest(fake_docker.FakeDockerTestBase):
 
     def test_bad_version(self):
         dclient = fake_docker.FakeDockerClient()
-        dclient.version = lambda: {'Version': '1.6.0'}
+        dclient.version = lambda: {'Version': '1.4.0'}
         with self.assertRaises(utils.AppstartAbort):
             utils.check_docker_version(dclient)
 
