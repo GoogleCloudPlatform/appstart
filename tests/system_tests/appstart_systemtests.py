@@ -30,6 +30,7 @@ from appstart import utils, devappserver_init
 
 from appstart.sandbox import container_sandbox
 
+APPSTART_BASE_IMAGE = "appstart_systemtest_devappserver"
 
 # pylint: disable=too-many-public-methods
 class SystemTests(unittest.TestCase):
@@ -42,10 +43,8 @@ class SystemTests(unittest.TestCase):
         This depends on a properly set up docker environment.
         """
         
-        SystemTests.base_image = "appstart_systemtest_devappserver"
-        
         utils.build_from_directory(os.path.dirname(devappserver_init.__file__),
-                                   SystemTests.base_image,
+                                   APPSTART_BASE_IMAGE,
                                    nocache=True)
 
         test_directory = os.path.dirname(os.path.realpath(__file__))
@@ -56,7 +55,7 @@ class SystemTests(unittest.TestCase):
         cls.sandbox = container_sandbox.ContainerSandbox(
             cls.conf_file,
             storage_path=temp_storage_path,
-            devbase_image=SystemTests.base_image,
+            devbase_image=APPSTART_BASE_IMAGE,
             force_version=True)
 
         # Set up the containers
@@ -67,7 +66,7 @@ class SystemTests(unittest.TestCase):
         """Clean up the docker environment."""
         cls.sandbox.stop()
 
-def make_endpoint_test(endpoint, handler):
+def make_endpoint_test(endpoint):
     """Create and return a function that tests the endpoint.
 
     Args:
@@ -98,14 +97,14 @@ if __name__ == '__main__':
     # Sync with urls in services_test_app.py
     # Keeping handler as None for later on customizing of tests
     urls = [
-        ('/datastore', None),
-        ('/logging', None),
-        ('/memcache', None)
+         '/datastore',
+         '/logging', 
+         '/memcache'
     ]
 
     
     # Get all the endpoints from the test app and turn them into tests.
-    for ep, handlr in urls:
-        endpoint_test = make_endpoint_test(ep, handlr)
+    for ep in urls:
+        endpoint_test = make_endpoint_test(ep)
         setattr(SystemTests, endpoint_test.__name__, endpoint_test)
     unittest.main()
