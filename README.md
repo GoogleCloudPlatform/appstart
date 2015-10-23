@@ -19,13 +19,16 @@ From its root directory, appstart can be installed like so:
 
 ## Requirements
 
-Appstart requires a running Docker server. The server can be running in a
-Boot2Docker VM, as long as the docker environment variable are set correctly.
-See the link below for boot2docker to find out more about docker environment
-variables. Appstart is known to work for Docker server version 1.5.0.  For
-information about installing docker and/or Boot2Docker see:
+Appstart requires a running Docker server. The server can be running in a 
+docker-machine instance or even a Boot2Docker VM, as long as the docker 
+environment variable are set correctly. See the link below for boot2docker to 
+find out more about docker environment variables. Appstart is known to work 
+for Docker server versions 1.5.0 to 1.8.3 and will accept any version less 
+than 1.9.  For information about installing docker, docker-machine and/or 
+Boot2Docker see:
 
   * docker: https://docs.docker.com/installation/
+  * docker-machine: https://docs.docker.com/machine/
   * boot2docker: http://boot2docker.io/
 
 ## Usage
