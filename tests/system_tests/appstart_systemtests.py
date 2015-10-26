@@ -97,9 +97,9 @@ if __name__ == '__main__':
     # Sync with urls in services_test_app.py
     # Keeping handler as None for later on customizing of tests
     urls = [
-         '/datastore',
-         '/logging', 
-         '/memcache'
+        '/datastore',
+        '/logging',
+        '/memcache'
     ]
 
     

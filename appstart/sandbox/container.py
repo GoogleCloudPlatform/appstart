@@ -155,10 +155,11 @@ class Container(object):
                 except requests.exceptions.ReadTimeout:
                     pass
 
-                # An APIError occurs if the container doesn't exist anymore.
-                # This indicates that we're shutting down, so we can break
-                # and terminate the thread.
-                except docker.errors.APIError:
+                # An APIError/NullResource occurs if the container doesn't
+                # exist anymore. This indicates that we're shutting down, so
+                # we can break and terminate the thread.  (The older versions
+                # produce an APIError).
+                except (docker.errors.APIError, docker.errors.NullResource):
                     break
 
         if stream:
