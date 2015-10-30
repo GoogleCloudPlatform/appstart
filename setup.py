@@ -59,7 +59,16 @@ setuptools.setup(
     package_data={'appstart.devappserver_init': ['Dockerfile', 'das.sh'],
                   'appstart.pinger': ['Dockerfile'],
                   'appstart.sandbox': ['app.yaml']},
-    install_requires=['docker-py'],
+    install_requires=[
+        'backports.ssl-match-hostname==3.4.0.2',
+        'docker-py==1.5.0',
+        'mox==0.5.3',
+        'PyYAML==3.11',
+        'requests==2.8.1',
+        'six==1.10.0',
+        'websocket-client==0.32.0',
+        'wheel==0.24.0',
+    ],
     entry_points={
         'console_scripts': [
             'appstart=appstart.cli.start_script:main',
