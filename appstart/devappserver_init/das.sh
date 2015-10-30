@@ -25,4 +25,5 @@ python $(find $SDK_ROOT -name dev_appserver.py | head -1) \
     --host=0.0.0.0 \
     --storage_path=/storage \
     --logs_path=./log.txt \
+    --automatic_restart=False \
     /app/$CONFIG_FILE
