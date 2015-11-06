@@ -27,6 +27,7 @@ import uuid
 import docker
 
 from appstart import constants
+from appstart import utils
 
 DEFAULT_IMAGES = [constants.DEVAPPSERVER_IMAGE,
                   constants.PINGER_IMAGE]
@@ -83,7 +84,7 @@ class FakeDockerClient(object):
         self.kwargs = kwargs
 
     def version(self):
-        return {'Version': '1.5.0'}
+        return {'Version': utils.format_version(utils.MIN_DOCKER_VERSION)}
 
     def ping(self):
         """Do nothing."""
