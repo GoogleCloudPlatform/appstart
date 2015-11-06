@@ -40,7 +40,8 @@ LINUX_DOCKER_HOST = '/var/run/docker.sock'
 
 # Supported docker versions
 DOCKER_API_VERSION = '1.17'
-DOCKER_SERVER_VERSION = '1.5.0'
+MIN_DOCKER_VERSION = [1, 8, 0]
+MAX_DOCKER_VERSION = [1, 9, 1000]
 
 # Logger that is shared accross all components of appstart
 _logger = None
@@ -98,11 +99,15 @@ def check_docker_version(dclient):
     """
     version = dclient.version()
     server_version = [_soft_int(x) for x in version.get('Version').split('.')]
-    if server_version < [1, 5, 0] or server_version > [1, 8, 1000]:
-        raise AppstartAbort('Expected docker server version {0}. '
-                            'Found server version {1}. Use --force_version '
+    if (server_version < MIN_DOCKER_VERSION or
+        server_version > MAX_DOCKER_VERSION):
+        raise AppstartAbort('Expected docker server version between {0} and {1}. '
+                            'Found server version {2}. Use --force_version '
                             'flag to run Appstart '
-                            'anyway'.format(DOCKER_SERVER_VERSION,
+                            'anyway'.format('.'.join(str(x) for x in
+                                                     MIN_DOCKER_VERSION),
+                                            '.'.join(str(x) for x in
+                                                     MAX_DOCKER_VERSION),
                                             server_version))
 
 # TODO(mmuller): "ClientWrapper" is a pretty horrible kludge.  Rewrite it so
