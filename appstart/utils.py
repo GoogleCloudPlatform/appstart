@@ -85,6 +85,20 @@ def _soft_int(val):
         return 0
 
 
+def _format_version(version):
+    """Converts a version specified as a list of integers to a string.
+
+    e.g. [1, 2, 3] -> '1.2.3'
+
+    Args:
+        version: ([int, ...]) Version as a list of integers.
+
+    Returns:
+        (str) Stringified version.
+    """
+    return '.'.join(str(x) for x in MIN_DOCKER_VERSION)
+
+
 def check_docker_version(dclient):
     """Check version of docker server and log errors if it's too old/new.
 
@@ -104,11 +118,9 @@ def check_docker_version(dclient):
         raise AppstartAbort('Expected docker server version between {0} and {1}. '
                             'Found server version {2}. Use --force_version '
                             'flag to run Appstart '
-                            'anyway'.format('.'.join(str(x) for x in
-                                                     MIN_DOCKER_VERSION),
-                                            '.'.join(str(x) for x in
-                                                     MAX_DOCKER_VERSION),
-                                            server_version))
+                            'anyway'.format(_format_version(MIN_DOCKER_VERSION),
+                                            _format_version(MAX_DOCKER_VERSION),
+                                            _format_version(server_version)))
 
 # TODO(mmuller): "ClientWrapper" is a pretty horrible kludge.  Rewrite it so
 # that it doesn't indiscriminately reconnect every time an attribute is
