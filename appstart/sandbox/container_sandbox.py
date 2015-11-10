@@ -167,8 +167,7 @@ class ContainerSandbox(object):
                 of mismatched docker versions.
         """
         self.cur_time = time.strftime(TIME_FMT)
-        self.app_id = (application_id or
-                       time.strftime('%s'))
+        self.app_id = (application_id or None)
         self.internal_api_port = internal_api_port
         self.internal_proxy_port = internal_proxy_port
         self.internal_admin_port = internal_admin_port
@@ -241,14 +240,17 @@ class ContainerSandbox(object):
             # services like datastore, blobstore, etc. It also needs
             # to know where to find the config file, which port to
             # run the proxy on, and which port to run the api server on.
-            das_env = {'APP_ID': self.app_id,
-                       'CLEAR_DATASTORE': self.clear_datastore,
+            das_env = {'CLEAR_DATASTORE': self.clear_datastore,
                        'PROXY_PORT': self.internal_proxy_port,
                        'API_PORT': self.internal_api_port,
                        'ADMIN_PORT': self.internal_admin_port,
                        'CONFIG_FILE': os.path.join(
                            self.das_offset,
                            os.path.basename(self.conf_path))}
+
+            if self.app_id:
+                das_env['APP_ID'] = self.app_id
+
             devappserver_image = self.build_devappserver_image(
               devbase_image=self.devbase_image
             )
