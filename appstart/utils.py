@@ -28,6 +28,7 @@ import ssl
 import sys
 import tarfile
 import tempfile
+import yaml
 
 import docker
 
@@ -249,6 +250,36 @@ def make_tar_build_context(dockerfile, context_files):
     t.close()
     f.seek(0)
     return f
+
+
+def add_files_from_static_dirs(file_dict, config_name):
+    """Add all files from static directories specified in the config file.
+
+    Args:
+        file_dict: ({str: NoneType}) A dictionary who's keys are filenames.
+        config_name: (str) Name of the config file.
+
+    Raises:
+        AppstartAbort: An invalid field type was discovered.
+    """
+    config = yaml.load(open(config_name))
+    root_dir = os.path.dirname(config_name)
+    handlers = config.get('handlers')
+    if handlers and isinstance(handlers, list):
+        for handler in handlers:
+            if not isinstance(handler, dict):
+                raise AppstartAbort('"handlers" section of {!r} contains an '
+                                    'illegal value'.format(config_name))
+            static_dir = handler.get('static_dir')
+            if static_dir:
+                if not isinstance(static_dir, basestring):
+                    raise AppstartAbort('"handlers" section of {!r} contains an '
+                                        'non-string static_dir.' % config_name)
+                print 'walking %s' % static_dir
+                for dirname, subdirs, files in os.walk(
+                    os.path.join(root_dir, static_dir)):
+                    for filename in files:
+                        file_dict[os.path.join(dirname, filename)] = None
 
 
 class TarWrapper(object):

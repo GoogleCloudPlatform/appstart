@@ -499,18 +499,21 @@ class ContainerSandbox(object):
         files_to_add = {self.conf_path: None}
         if self.application_configuration.is_java:
             files_to_add[self.get_web_xml(self.conf_path)] = None
+        utils.add_files_from_static_dirs(files_to_add, self.conf_path)
 
         # The Dockerfile should add the config files to
         # the /app folder in devappserver's container.
         dockerfile = """
         FROM %(das_repo)s
-        ADD %(path)s/* %(dest)s
+        ADD %(path)s/ %(dest)s
+        WORKDIR /app/
         """ % {'das_repo': devbase_image,
                'path': os.path.dirname(self.conf_path),
                'dest': os.path.join('/app', self.das_offset)}
 
         # Construct a file-like object from the Dockerfile.
         dockerfile_obj = io.BytesIO(dockerfile.encode('utf-8'))
+        print 'files to add = %s' % files_to_add
         build_context = utils.make_tar_build_context(dockerfile_obj,
                                                      files_to_add)
         image_name = self.make_timestamped_name('devappserver_image',
