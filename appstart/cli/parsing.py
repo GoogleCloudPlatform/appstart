@@ -22,6 +22,30 @@ import argparse
 from ..validator import contract
 
 
+class StorePortMapAction(argparse.Action):
+    """Arg parser action to store a port map.
+
+    Accepts an option value consisting of a comma-separated list of
+    host_port:container_port mappings.
+    """
+
+    def __call__(self, parser, namespace, values, option_string):
+        vals = values.split(',')
+        result = {}
+        try:
+            for val in vals:
+                try:
+                    host_port, container_port = val.split(':')
+                except ValueError:
+                    host_port = container_port = val
+                result[int(container_port)] = int(host_port)
+        except ValueError:
+            parser.error('bad value for option {0}.  Expected a comma '
+                         'separated list of colon separated port '
+                         'mappings.'.format(option_string))
+        setattr(namespace, self.dest, result)
+
+
 def make_appstart_parser():
     """Make an argument parser to take in command line arguments.
 
@@ -202,3 +226,15 @@ def add_appstart_args(parser):
                         help='Clear the contents of the datastore before '
                         'running the application.')
     parser.set_defaults(clear_datastore=False)
+
+    parser.add_argument('--extra_ports',
+                        action=StorePortMapAction,
+                        dest='extra_ports',
+                        help='A comma separated map of '
+                        'host_port:container_port pairs defining the mapping '
+                        'from host ports to container ports on the '
+                        'application container for an arbitrary set of ports.'
+                        'If a single value is provided instead of a colon '
+                        'separated pair, that value will be used for both the '
+                        'host port and the container port.')
+    parser.set_defaults(extra_ports=None)
