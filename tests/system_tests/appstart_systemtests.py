@@ -23,6 +23,7 @@ status code if the endpoint is broken.
 
 import logging
 import os
+import socket
 import requests
 import time
 import unittest
@@ -34,7 +35,11 @@ APPSTART_BASE_IMAGE = "appstart_systemtest_devappserver"
 
 # pylint: disable=too-many-public-methods
 class SystemTests(unittest.TestCase):
-    """Probe endpoints on a running application container."""
+    """Probe endpoints on a running application container.
+    
+    In addition to the tests defined here, this class will be populated with 
+    tests from the endpoints using make_endpoint_test() below.
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -56,7 +61,8 @@ class SystemTests(unittest.TestCase):
             cls.conf_file,
             storage_path=temp_storage_path,
             devbase_image=APPSTART_BASE_IMAGE,
-            force_version=True)
+            force_version=True,
+            extra_ports={1000: 1111})
 
         # Set up the containers
         cls.sandbox.start()
@@ -65,6 +71,17 @@ class SystemTests(unittest.TestCase):
     def tearDownClass(cls):
         """Clean up the docker environment."""
         cls.sandbox.stop()
+    
+    def test_extra_ports(self):
+        res = requests.get('http://%s:%i/openport' %
+                           (self.sandbox.devappserver_container.host,
+                            self.sandbox.port))
+        self.assertEqual(res.status_code, 200)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+        s.connect((self.sandbox.devappserver_container.host, 1111))
+        s.send('test string')
+        self.assertEqual(s.recv(1024), 'test string')
+        
 
 def make_endpoint_test(endpoint):
     """Create and return a function that tests the endpoint.
