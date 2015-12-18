@@ -72,6 +72,7 @@ class ContainerSandbox(object):
                  application_id=None,
                  application_port=8080,
                  admin_port=8000,
+                 proxy_port=8088,
                  clear_datastore=False,
                  internal_admin_port=32768,
                  internal_api_port=32769,
@@ -166,8 +167,8 @@ class ContainerSandbox(object):
                 container to start.
             force_version: (bool) Whether or not to continue in the case
                 of mismatched docker versions.
-            extra_ports: ({int: int, ...} or None) A mapping from application 
-                docker container ports to host ports, allowing 
+            extra_ports: ({int: int, ...} or None) A mapping from application
+                docker container ports to host ports, allowing
                 additional application ports to be exposed.
         """
         self.cur_time = time.strftime(TIME_FMT)
@@ -184,6 +185,7 @@ class ContainerSandbox(object):
                 self.cur_time))
         self.image_name = image_name
         self.admin_port = admin_port
+        self.proxy_port = proxy_port
         self.dclient = utils.get_docker_client()
         self.devappserver_container = None
         self.app_container = None
@@ -265,6 +267,7 @@ class ContainerSandbox(object):
             port_bindings = {
                 DEFAULT_APPLICATION_PORT: self.port,
                 self.internal_admin_port: self.admin_port,
+                self.internal_proxy_port: self.proxy_port,
             }
             if self.extra_ports:
                 port_bindings.update(self.extra_ports)
@@ -464,8 +467,19 @@ class ContainerSandbox(object):
             attempt += 1
             time.sleep(1)
 
+        # Tell the user where to connect, depending on whether the
+        # devappserver is running.
+        if self.run_devappserver:
+            port = self.proxy_port
+        else:
+            port = self.port
         get_logger().info('Your application is live. '
-                          'Access it at: {0}:{1}'.format(host, str(self.port)))
+                          'Access it at: {0}:{1}'.format(host, port))
+        if self.run_devappserver:
+            get_logger().info('(port {0} goes through the dev_appserver '
+                              'proxy, for direct access use {1})'.format(
+                                  self.proxy_port,
+                                  self.port))
 
     @staticmethod
     def app_directory_from_config(full_config_file_path):

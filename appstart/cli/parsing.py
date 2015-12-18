@@ -126,7 +126,7 @@ def add_appstart_args(parser):
                         default=8080,
                         type=int,
                         help='The port on the Docker host machine where '
-                        'the application should be reached. Defaults to '
+                        'your application should be reached. Defaults to '
                         '8080.')
     parser.add_argument('--admin_port',
                         default='8000',
@@ -134,6 +134,14 @@ def add_appstart_args(parser):
                         help='The port on the Docker host machine where '
                         'the admin panel should be reached. Defaults to '
                         '8000.')
+    parser.add_argument('--proxy_port',
+                        default='8088',
+                        type=int,
+                        help='The port on the Docker host machine where '
+                        'the application proxy server can be reached (this '
+                        'is generally the port you should use to access '
+                        'your application). Defaults to 8088.')
+
     parser.add_argument('--application_id',
                         default=None,
                         help='The api server uses this ID to maintain an '

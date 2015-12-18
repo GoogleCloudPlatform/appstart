@@ -75,12 +75,19 @@ class SystemTests(unittest.TestCase):
     def test_extra_ports(self):
         res = requests.get('http://%s:%i/openport' %
                            (self.sandbox.devappserver_container.host,
-                            self.sandbox.port))
+                            self.sandbox.proxy_port))
         self.assertEqual(res.status_code, 200)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
         s.connect((self.sandbox.devappserver_container.host, 1111))
         s.send('test string')
         self.assertEqual(s.recv(1024), 'test string')
+
+    def test_static_files(self):
+        res = requests.get('http://%s:%i/static/file.txt' %
+                           (self.sandbox.devappserver_container.host,
+                            self.sandbox.proxy_port))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.text, 'file contents')
         
 
 def make_endpoint_test(endpoint):
