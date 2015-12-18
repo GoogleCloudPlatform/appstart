@@ -20,6 +20,11 @@ if it is working, and 500 if there are any exceptions
 # This file conforms to the external style guide
 # pylint: disable=bad-indentation
 
+import sys
+import logging
+import socket
+import threading
+
 import webapp2
 
 from google.appengine.api import memcache
@@ -79,9 +84,32 @@ class MemcacheTest(webapp2.RequestHandler):
         assert memcache.get('test') == 'hi', 'Memcache failure'
 
 
+def socket_thread():
+    logging.info('In socket thread')
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+    s.bind(('', 1000))
+    s.listen(5)
+    while True:
+        c, addr = s.accept()
+        data = c.recv(1024)
+        c.send(data)
+        c.close()
+
+
+class OpenPort(webapp2.RequestHandler):
+    """Open port 1000."""
+
+    def get(self):
+        logging.info('Starting socket thread')
+        threading.Thread(target=socket_thread).start()
+        self.content_type = 'text/plain'
+        self.response.write('started thread.')
+
+
 # pylint: disable=invalid-name
 urls = [('/datastore', DataStoreTest),
         ('/logging', LoggingTest),
-        ('/memcache', MemcacheTest)]
+        ('/memcache', MemcacheTest),
+        ('/openport', OpenPort)]
 
 app = webapp2.WSGIApplication(urls, debug=True)

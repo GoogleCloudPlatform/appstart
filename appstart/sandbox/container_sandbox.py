@@ -82,7 +82,8 @@ class ContainerSandbox(object):
                  nocache=False,
                  timeout=MAX_ATTEMPTS,
                  force_version=False,
-                 devbase_image=constants.DEVAPPSERVER_IMAGE):
+                 devbase_image=constants.DEVAPPSERVER_IMAGE,
+                 extra_ports=None):
         """Get the sandbox ready to construct and run the containers.
 
         Args:
@@ -165,6 +166,9 @@ class ContainerSandbox(object):
                 container to start.
             force_version: (bool) Whether or not to continue in the case
                 of mismatched docker versions.
+            extra_ports: ({int: int, ...} or None) A mapping from application 
+                docker container ports to host ports, allowing 
+                additional application ports to be exposed.
         """
         self.cur_time = time.strftime(TIME_FMT)
         self.app_id = (application_id or None)
@@ -188,7 +192,7 @@ class ContainerSandbox(object):
         self.run_devappserver = run_api_server
         self.timeout = timeout        
         self.devbase_image=constants.DEVAPPSERVER_IMAGE
-        
+        self.extra_ports = extra_ports
         
         if devbase_image:
           self.devbase_image=devbase_image
@@ -258,6 +262,13 @@ class ContainerSandbox(object):
                 self.make_timestamped_name('devappserver',
                                            self.cur_time))
 
+            port_bindings = {
+                DEFAULT_APPLICATION_PORT: self.port,
+                self.internal_admin_port: self.admin_port,
+            }
+            if self.extra_ports:
+                port_bindings.update(self.extra_ports)
+
             # The host_config specifies port bindings and volume bindings.
             # /storage is bound to the storage_path. Internally, the
             # devappserver writes all the db files to /storage. The mapping
@@ -265,10 +276,7 @@ class ContainerSandbox(object):
             # port mappings, we only want to expose the application (via the
             # proxy), and the admin panel.
             devappserver_hconf = docker.utils.create_host_config(
-                port_bindings={
-                    DEFAULT_APPLICATION_PORT: self.port,
-                    self.internal_admin_port: self.admin_port,
-                },
+                port_bindings=port_bindings,
                 binds={
                     self.storage_path: {'bind': '/storage'},
                 }
@@ -278,7 +286,7 @@ class ContainerSandbox(object):
             self.devappserver_container.create(
                 name=devappserver_container_name,
                 image=devappserver_image,
-                ports=[DEFAULT_APPLICATION_PORT, self.internal_admin_port],
+                ports=port_bindings.keys(),
                 volumes=['/storage'],
                 host_config=devappserver_hconf,
                 environment=das_env)
