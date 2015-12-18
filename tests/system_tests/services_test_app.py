@@ -85,6 +85,8 @@ class MemcacheTest(webapp2.RequestHandler):
 
 
 def socket_thread():
+    # Function that runs a little server on port 1000 that just echoes back
+    # the first chunk of data that it receives.
     logging.info('In socket thread')
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
     s.bind(('', 1000))
