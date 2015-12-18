@@ -40,8 +40,8 @@ class StorePortMapAction(argparse.Action):
                     host_port = container_port = val
                 result[int(container_port)] = int(host_port)
         except ValueError:
-            parser.error('bad value for option {0}.  Expected a comma '
-                         'separated list of colon separated port '
+            parser.error('Bad value for option {0}.  Expected a comma '
+                         'separated list of colon-separated port '
                          'mappings.'.format(option_string))
         setattr(namespace, self.dest, result)
 
