@@ -20,8 +20,10 @@
 import io
 import logging
 import os
+import shutil
 import tarfile
 import tempfile
+import textwrap
 import unittest
 
 import docker
@@ -135,6 +137,42 @@ class TarTest(unittest.TestCase):
         self.assertEqual(dirs, ['baz'])
         with self.assertRaises(ValueError):
             wrapped_tar.list('root/bar.txt')
+
+
+class FileCollectionTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.files = []
+        for name in ('foo', 'bar', 'baz'):
+            name_dir = os.path.join(self.temp_dir, name)
+            os.mkdir(name_dir)
+            file_name = os.path.join(name_dir, name + '.txt')
+            with open(file_name, 'w') as f:
+                f.write('example file')
+
+            # 'baz' is excluded from the static dirs.
+            if name != 'baz':
+                self.files.append(file_name)
+        self.config_file = os.path.join(self.temp_dir, 'app.yaml')
+        with open(self.config_file, 'w') as f:
+            f.write(textwrap.dedent("""\
+                handlers:
+                - url: foo
+                  static_dir: foo
+                - url: bar
+                  static_dir: bar
+                """))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir)
+
+    def test_add_files(self):
+        data = {}
+        utils.add_files_from_static_dirs(data, self.config_file)
+        self.assertEqual(
+            data,
+            dict((name, None) for name in self.files))
 
 
 class LoggerTest(unittest.TestCase):

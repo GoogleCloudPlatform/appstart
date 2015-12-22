@@ -82,6 +82,10 @@ don't consume these services, you can run appstart like this:
 
     $ appstart PATH_TO_CONFIG_FILE --no_api_server
 
+Be aware that the api server also functions as a proxy and static file server,
+so if you turn it off you'll need to serve any static files from your
+application.
+
 ## Options
 
 To see all command line options, run:
