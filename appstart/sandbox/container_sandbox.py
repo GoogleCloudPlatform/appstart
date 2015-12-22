@@ -467,7 +467,7 @@ class ContainerSandbox(object):
             attempt += 1
             time.sleep(1)
 
-        # Tell the user where to connect, depending on whether the
+        # Tell the user where to connect, depending on whether or not the
         # devappserver is running.
         if self.run_devappserver:
             port = self.proxy_port
@@ -535,7 +535,6 @@ class ContainerSandbox(object):
 
         # Construct a file-like object from the Dockerfile.
         dockerfile_obj = io.BytesIO(dockerfile.encode('utf-8'))
-        print 'files to add = %s' % files_to_add
         build_context = utils.make_tar_build_context(dockerfile_obj,
                                                      files_to_add)
         image_name = self.make_timestamped_name('devappserver_image',

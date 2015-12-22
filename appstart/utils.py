@@ -273,7 +273,7 @@ def add_files_from_static_dirs(file_dict, config_name):
             static_dir = handler.get('static_dir')
             if static_dir:
                 if not isinstance(static_dir, basestring):
-                    raise AppstartAbort('"handlers" section of {!r} contains an '
+                    raise AppstartAbort('"handlers" section of {!r} contains a '
                                         'non-string static_dir.' % config_name)
                 print 'walking %s' % static_dir
                 for dirname, subdirs, files in os.walk(
